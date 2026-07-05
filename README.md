@@ -41,7 +41,8 @@ or after the editable install.
 ## Light Laptop Pipeline
 
 Use `--light` to run the pipeline on 20 T2 MRI exams selected from the official
-split labels: 10 training, 5 validation, and 5 test exams.
+split labels: 10 training, 5 validation, and 5 test exams. NPZ preparation keeps
+only the middle labeled slice from each selected exam.
 
 ```powershell
 prost-t2 run `
@@ -172,8 +173,9 @@ prost-t2 train --manifest D:\fastmri_prostate\npz_t2_coils\manifest.csv --runs-d
   (`shape[0] // 2`).
 - Up to five coils are selected per patient volume using highest image-space
   energy, measured on the selected acquisition across all slices.
-- NPZ files store `image_complex` with shape `(coils, height, width)` plus
-  patient, slice, split, and coil metadata.
+- NPZ preparation keeps the middle labeled slice from each T2 volume, and each
+  file stores `image_complex` with shape `(coils, height, width)` plus patient,
+  slice, split, and coil metadata.
 
 ## Publishing
 

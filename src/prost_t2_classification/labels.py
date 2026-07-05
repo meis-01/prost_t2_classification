@@ -126,6 +126,16 @@ def select_split_exams(labels: pd.DataFrame, split_counts: Mapping[str, int]) ->
     return selected
 
 
+def select_middle_slices(labels: pd.DataFrame) -> pd.DataFrame:
+    indices = []
+    for _, group in labels.groupby(["folder", "fastmri_rawfile"], sort=True):
+        group = group.sort_values("slice")
+        indices.append(int(group.index[len(group) // 2]))
+    if not indices:
+        return labels.copy()
+    return labels.loc[indices].copy().reset_index(drop=True)
+
+
 def exam_keys_from_labels(labels: pd.DataFrame) -> Set[tuple[str, str]]:
     return {
         normalize_exam_key(str(row.folder), str(row.fastmri_rawfile))

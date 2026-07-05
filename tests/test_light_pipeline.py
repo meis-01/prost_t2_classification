@@ -13,6 +13,7 @@ from prost_t2_classification.download import (
 )
 from prost_t2_classification.labels import (
     parse_split_exam_counts,
+    select_middle_slices,
     select_split_exams,
 )
 
@@ -118,3 +119,10 @@ def test_run_accepts_separate_labels_path():
     )
 
     assert args.labels == Path("D:/fastmri_prostate/labels")
+
+
+def test_select_middle_slices_keeps_one_middle_label_per_exam():
+    selected = select_middle_slices(_labels())
+
+    assert selected.groupby(["folder", "fastmri_rawfile"]).size().eq(1).all()
+    assert selected["slice"].eq(2).all()

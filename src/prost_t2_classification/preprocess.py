@@ -20,6 +20,7 @@ from .labels import (
     load_t2_labels,
     normalize_exam_key,
     resolve_reconstruction_path,
+    select_middle_slices,
     select_split_exams,
 )
 from .logging_utils import get_logger
@@ -130,6 +131,7 @@ def make_npz_dataset(
     if limit_patients is not None:
         keep_patients = sorted(labels["fastmri_pt_id"].unique())[:limit_patients]
         labels = labels[labels["fastmri_pt_id"].isin(keep_patients)].copy()
+    labels = select_middle_slices(labels)
     if limit_slices is not None:
         labels = labels.head(limit_slices).copy()
 
