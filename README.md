@@ -15,10 +15,24 @@ significant prostate cancer.
 
 ## Install
 
+From PyPI:
+
+```powershell
+python -m pip install prost-t2-classification
+```
+
+Confirm the console command is available:
+
+```powershell
+prost-t2 --help
+```
+
+For development from a local checkout:
+
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -U pip
-.\.venv\Scripts\python -m pip install -e .
+.\.venv\Scripts\python -m pip install -e ".[dev]"
 ```
 
 For CUDA training, install the PyTorch build that matches your GPU/driver before
@@ -109,3 +123,27 @@ prost-t2 train --manifest D:\fastmri_prostate\npz_t2_coils\manifest.csv --runs-d
   energy, measured on the selected acquisition across all slices.
 - NPZ files store `image_complex` with shape `(coils, height, width)` plus
   patient, slice, split, and coil metadata.
+
+## Publishing
+
+Releases are published to PyPI by GitHub Actions using PyPI Trusted Publishing,
+so the repository does not need a long-lived PyPI API token.
+
+Create a pending publisher on PyPI with these values:
+
+- PyPI project name: `prost-t2-classification`
+- GitHub owner: `meis-01`
+- GitHub repository: `prost_t2_classification`
+- Workflow file: `publish.yml`
+- GitHub environment: `pypi`
+
+Then bump `__version__` in `src/prost_t2_classification/__init__.py`, commit the
+change, and push a matching tag:
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The publish workflow checks that the tag matches the package version before it
+uploads the wheel and source distribution.

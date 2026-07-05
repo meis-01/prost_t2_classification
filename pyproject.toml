@@ -4,12 +4,25 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prost-t2-classification"
-version = "0.1.0"
+dynamic = ["version"]
 description = "T2-only fastMRI prostate coil-selection and real-vs-complex classification pipeline."
-readme = "README.md"
+readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.10"
 authors = [
   { name = "Meisam Ashraf" }
+]
+keywords = ["fastmri", "prostate", "classification", "mri", "pytorch"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence"
 ]
 dependencies = [
   "fastmri-tools>=0.1.0",
@@ -23,11 +36,23 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "build>=1.2",
   "pytest>=8"
 ]
 
 [project.scripts]
 prost-t2 = "prost_t2_classification.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/meis-01/prost_t2_classification"
+Repository = "https://github.com/meis-01/prost_t2_classification"
+Issues = "https://github.com/meis-01/prost_t2_classification/issues"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.dynamic]
+version = { attr = "prost_t2_classification.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
