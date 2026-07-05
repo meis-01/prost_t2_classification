@@ -9,25 +9,6 @@ def middle_acquisition_index(num_acquisitions: int) -> int:
     return num_acquisitions // 2
 
 
-def top_energy_coils_from_stream(
-    image_dataset,
-    *,
-    acquisition_index: int,
-    max_coils: int = 5,
-) -> np.ndarray:
-    if image_dataset.ndim != 5:
-        raise ValueError(
-            "Expected image_complex with shape (acquisitions, slices, coils, height, width)."
-        )
-    num_slices = image_dataset.shape[1]
-    num_coils = image_dataset.shape[2]
-    energy = np.zeros(num_coils, dtype=np.float64)
-    for slice_index in range(num_slices):
-        coil_images = np.asarray(image_dataset[acquisition_index, slice_index])
-        energy += np.sum(np.abs(coil_images) ** 2, axis=(-2, -1))
-    return top_energy_coils(energy, max_coils=max_coils)
-
-
 def top_energy_coils(energy: np.ndarray, *, max_coils: int = 5) -> np.ndarray:
     if energy.ndim != 1:
         raise ValueError("energy must be a 1D array.")

@@ -199,8 +199,4 @@ def resolve_reconstruction_path(recon_root: Path, folder: str, rawfile: str) -> 
     expected = recon_root / folder / f"{Path(rawfile).stem}_complex_recon.h5"
     if expected.exists():
         return expected
-
-    matches = sorted(recon_root.rglob(f"{Path(rawfile).stem}_complex_recon.h5"))
-    if matches:
-        return matches[0]
     raise FileNotFoundError(f"Could not find reconstruction for {folder}/{rawfile} under {recon_root}")

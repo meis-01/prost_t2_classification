@@ -194,6 +194,8 @@ def test_reconstruct_selected_t2_file_writes_single_acquisition_slice(tmp_path):
     assert result.image_complex_shape == (1, 1, 2, 4, 4)
     with h5py.File(output_path, "r") as h5:
         assert h5["image_complex"].shape == (1, 1, 2, 4, 4)
+        assert "kspace_regridded" not in h5
+        assert "kspace_grappa" not in h5
         assert h5.attrs["subset_reconstruction"] == np.True_
         assert h5.attrs["selected_acquisition_index"] == 1
         assert h5.attrs["selected_slice_index"] == 2
