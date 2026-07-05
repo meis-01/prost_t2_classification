@@ -15,10 +15,10 @@ from .download import (
 )
 from .labels import (
     DEFAULT_LIGHT_SPLIT_EXAM_COUNTS,
-    exam_keys_from_labels,
     load_t2_labels,
     parse_split_exam_counts,
     rawfile_names_from_labels,
+    select_preprocessing_labels,
     select_split_exams,
 )
 from .logging_utils import configure_logging
@@ -53,10 +53,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     recon_parser = subparsers.add_parser("reconstruct", help="Run fastmri-tools reconstruction for T2 H5 files")
     recon_parser.add_argument("--raw-root", type=Path, required=True)
+    recon_parser.add_argument("--labels", type=Path, default=None, help="Label CSV or directory; defaults to raw root when light/limits are used")
     recon_parser.add_argument("--recon-dir", type=Path, required=True)
     recon_parser.add_argument("--kernel-size", default="5,5")
     recon_parser.add_argument("--overwrite", action="store_true")
     recon_parser.add_argument("--limit", type=int, default=None)
+    recon_parser.add_argument("--limit-patients", type=int, default=None)
+    recon_parser.add_argument("--limit-slices", type=int, default=None)
+    add_light_args(recon_parser)
     recon_parser.set_defaults(func=cmd_reconstruct)
 
     npz_parser = subparsers.add_parser("make-npz", help="Create selected-coil NPZ files and manifest")
@@ -165,6 +169,22 @@ def select_light_labels(labels_path: Path, split_counts: dict[str, int]):
     return select_split_exams(labels, split_counts)
 
 
+def select_pipeline_labels(
+    labels_path: Path,
+    split_counts: Optional[dict[str, int]],
+    *,
+    limit_patients: Optional[int] = None,
+    limit_slices: Optional[int] = None,
+):
+    labels = load_t2_labels(labels_path)
+    return select_preprocessing_labels(
+        labels,
+        split_exam_counts=split_counts,
+        limit_patients=limit_patients,
+        limit_slices=limit_slices,
+    )
+
+
 def download_light_subset(
     entries: list[DownloadEntry],
     download_dir: Path,
@@ -254,12 +274,22 @@ def cmd_reconstruct(args) -> int:
     from .preprocess import reconstruct_t2_dataset
 
     kernel_size = parse_kernel_size(args.kernel_size)
+    light_counts = light_split_counts_from_args(args)
+    selected_labels = None
+    if args.labels is not None or light_counts is not None or args.limit_patients is not None or args.limit_slices is not None:
+        selected_labels = select_pipeline_labels(
+            args.labels or args.raw_root,
+            light_counts,
+            limit_patients=args.limit_patients,
+            limit_slices=args.limit_slices,
+        )
     reconstruct_t2_dataset(
         args.raw_root,
         args.recon_dir,
         kernel_size=kernel_size,
         skip_existing=not args.overwrite,
         limit=args.limit,
+        selected_labels=selected_labels,
     )
     return 0
 
@@ -286,10 +316,12 @@ def cmd_prepare_npz(args) -> int:
     from .preprocess import make_npz_dataset, reconstruct_t2_dataset
 
     light_counts = light_split_counts_from_args(args)
-    selected_exams = None
-    if light_counts is not None:
-        selected_labels = select_light_labels(args.labels or args.raw_root, light_counts)
-        selected_exams = exam_keys_from_labels(selected_labels)
+    selected_labels = select_pipeline_labels(
+        args.labels or args.raw_root,
+        light_counts,
+        limit_patients=args.limit_patients,
+        limit_slices=args.limit_slices,
+    )
 
     if not args.skip_reconstruct:
         reconstruct_t2_dataset(
@@ -298,7 +330,7 @@ def cmd_prepare_npz(args) -> int:
             kernel_size=parse_kernel_size(args.kernel_size),
             skip_existing=not args.overwrite,
             limit=args.limit,
-            selected_exams=selected_exams,
+            selected_labels=selected_labels,
         )
     make_npz_dataset(
         args.labels or args.raw_root,
@@ -358,7 +390,6 @@ def cmd_run(args) -> int:
     )
     labels_path = args.labels or extract_dir
 
-    selected_exams = None
     if not args.skip_download:
         entries = parse_prostate_download_script(args.download_script)
         if light_counts is None:
@@ -366,7 +397,7 @@ def cmd_run(args) -> int:
             if not args.skip_extract:
                 extract_archives(archives, extract_dir, overwrite=args.overwrite, source_root=download_dir)
         else:
-            selected_labels = download_light_subset(
+            download_light_subset(
                 entries,
                 download_dir,
                 extract_dir,
@@ -375,10 +406,10 @@ def cmd_run(args) -> int:
                 t2_download_dir=extract_dir,
                 stage_t2=False,
             )
-            selected_exams = exam_keys_from_labels(selected_labels)
-    elif light_counts is not None and (not args.skip_reconstruct or not args.skip_npz):
-        selected_labels = select_light_labels(labels_path, light_counts)
-        selected_exams = exam_keys_from_labels(selected_labels)
+
+    selected_labels = None
+    if not args.skip_reconstruct:
+        selected_labels = select_pipeline_labels(labels_path, light_counts)
 
     if not args.skip_reconstruct:
         from .preprocess import reconstruct_t2_dataset
@@ -388,7 +419,7 @@ def cmd_run(args) -> int:
             recon_dir,
             kernel_size=parse_kernel_size(args.kernel_size),
             skip_existing=not args.overwrite,
-            selected_exams=selected_exams,
+            selected_labels=selected_labels,
         )
 
     manifest = npz_dir / "manifest.csv" if npz_dir is not None else None

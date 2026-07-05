@@ -41,8 +41,8 @@ or after the editable install.
 ## Light Laptop Pipeline
 
 Use `--light` to run the pipeline on 20 T2 MRI exams selected from the official
-split labels: 10 training, 5 validation, and 5 test exams. NPZ preparation keeps
-only the middle labeled slice from each selected exam.
+split labels: 10 training, 5 validation, and 5 test exams. Reconstruction keeps
+only the middle acquisition and middle labeled slice from each selected exam.
 
 ```powershell
 prost-t2 run `
@@ -136,10 +136,11 @@ Download and extract labels plus T2 tarballs:
 prost-t2 download --download-script .\prostate_download_script.txt --download-dir D:\fastmri_prostate\archives --extract-dir D:\fastmri_prostate\raw
 ```
 
-Run GRAPPA/IFFT reconstruction with `fastmri-tools`:
+Run selected middle-acquisition/middle-slice GRAPPA/IFFT reconstruction with
+`fastmri-tools`:
 
 ```powershell
-prost-t2 reconstruct --raw-root D:\fastmri_prostate\raw --recon-dir D:\fastmri_prostate\recon_t2
+prost-t2 reconstruct --raw-root D:\fastmri_prostate\raw --labels D:\fastmri_prostate\raw --recon-dir D:\fastmri_prostate\recon_t2
 ```
 
 Create compact NPZ samples from the middle acquisition and top-energy coils:
@@ -167,15 +168,14 @@ prost-t2 train --manifest D:\fastmri_prostate\npz_t2_coils\manifest.csv --runs-d
 
 - The official `data_split` column is used directly, and patient leakage across
   train/validation/test is checked before training.
-- T2 `kspace` is reconstructed through `fastmri-tools`, producing complex
-  `image_complex` arrays.
-- The acquisition dimension is reduced by selecting the middle acquisition
-  (`shape[0] // 2`).
-- Up to five coils are selected per patient volume using highest image-space
-  energy, measured on the selected acquisition across all slices.
-- NPZ preparation keeps the middle labeled slice from each T2 volume, and each
-  file stores `image_complex` with shape `(coils, height, width)` plus patient,
-  slice, split, and coil metadata.
+- Before reconstruction, each selected T2 raw file is reduced to the middle
+  acquisition (`shape[0] // 2`) and the middle labeled slice for that exam.
+- The selected k-space slice is reconstructed through `fastmri-tools` GRAPPA and
+  centered IFFT primitives, producing a compact complex `image_complex` array.
+- Up to five coils are selected using highest image-space energy, measured on
+  the reconstructed selected acquisition/slice only.
+- Each NPZ stores `image_complex` with shape `(coils, height, width)` plus
+  patient, slice, split, acquisition, and coil metadata.
 
 ## Publishing
 

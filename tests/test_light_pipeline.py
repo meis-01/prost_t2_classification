@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -14,6 +15,7 @@ from prost_t2_classification.download import (
 from prost_t2_classification.labels import (
     parse_split_exam_counts,
     select_middle_slices,
+    select_preprocessing_labels,
     select_split_exams,
 )
 
@@ -126,3 +128,72 @@ def test_select_middle_slices_keeps_one_middle_label_per_exam():
 
     assert selected.groupby(["folder", "fastmri_rawfile"]).size().eq(1).all()
     assert selected["slice"].eq(2).all()
+
+
+def test_select_preprocessing_labels_applies_split_counts_then_middle_slices():
+    selected = select_preprocessing_labels(
+        _labels(),
+        split_exam_counts={"training": 2, "validation": 1, "test": 1},
+    )
+
+    exam_counts = selected.groupby("data_split")["fastmri_rawfile"].nunique().to_dict()
+    assert exam_counts == {"test": 1, "training": 2, "validation": 1}
+    assert len(selected) == 4
+    assert selected["slice"].eq(2).all()
+
+
+def test_reconstruct_accepts_labels_and_light_counts():
+    args = build_parser().parse_args(
+        [
+            "reconstruct",
+            "--raw-root",
+            "D:/fastmri_prostate/T2",
+            "--labels",
+            "D:/fastmri_prostate/labels",
+            "--recon-dir",
+            "D:/fastmri_prostate_light/recon_t2",
+            "--light",
+            "--light-counts",
+            "training=1,validation=1,test=1",
+        ]
+    )
+
+    assert args.labels == Path("D:/fastmri_prostate/labels")
+    assert args.light is True
+
+
+def test_reconstruct_selected_t2_file_writes_single_acquisition_slice(tmp_path):
+    h5py = pytest.importorskip("h5py")
+    pytest.importorskip("fastmri_tools")
+    from fastmri_tools.prostate_opts.fft import centered_ifft
+    from fastmri_tools.prostate_opts.grappa import grappa_fill
+
+    from prost_t2_classification.preprocess import reconstruct_selected_t2_file
+
+    input_path = tmp_path / "file_prostate_AXT2_001.h5"
+    output_path = tmp_path / "file_prostate_AXT2_001_complex_recon.h5"
+    kspace = (
+        np.ones((3, 4, 2, 4, 4), dtype=np.float32)
+        + 1j * np.ones((3, 4, 2, 4, 4), dtype=np.float32)
+    ).astype(np.complex64)
+    calibration = np.ones((4, 2, 4, 4), dtype=np.complex64)
+
+    with h5py.File(input_path, "w") as h5:
+        h5.create_dataset("kspace", data=kspace)
+        h5.create_dataset("calibration_data", data=calibration)
+
+    result = reconstruct_selected_t2_file(
+        input_path,
+        output_path,
+        centered_ifft=centered_ifft,
+        grappa_fill=grappa_fill,
+        kernel_size=(3, 3),
+        slice_one_based=3,
+    )
+
+    assert result.image_complex_shape == (1, 1, 2, 4, 4)
+    with h5py.File(output_path, "r") as h5:
+        assert h5["image_complex"].shape == (1, 1, 2, 4, 4)
+        assert h5.attrs["subset_reconstruction"] == np.True_
+        assert h5.attrs["selected_acquisition_index"] == 1
+        assert h5.attrs["selected_slice_index"] == 2

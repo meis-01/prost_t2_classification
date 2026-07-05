@@ -136,6 +136,27 @@ def select_middle_slices(labels: pd.DataFrame) -> pd.DataFrame:
     return labels.loc[indices].copy().reset_index(drop=True)
 
 
+def select_preprocessing_labels(
+    labels: pd.DataFrame,
+    *,
+    split_exam_counts: Mapping[str, int] | None = None,
+    limit_patients: int | None = None,
+    limit_slices: int | None = None,
+) -> pd.DataFrame:
+    assert_patient_split_disjoint(labels)
+
+    if split_exam_counts is not None:
+        labels = select_split_exams(labels, split_exam_counts)
+    if limit_patients is not None:
+        keep_patients = sorted(labels["fastmri_pt_id"].unique())[:limit_patients]
+        labels = labels[labels["fastmri_pt_id"].isin(keep_patients)].copy()
+
+    labels = select_middle_slices(labels)
+    if limit_slices is not None:
+        labels = labels.head(limit_slices).copy()
+    return labels
+
+
 def exam_keys_from_labels(labels: pd.DataFrame) -> Set[tuple[str, str]]:
     return {
         normalize_exam_key(str(row.folder), str(row.fastmri_rawfile))
