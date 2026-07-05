@@ -132,10 +132,18 @@ def test_select_middle_slices_keeps_one_middle_label_per_exam():
     assert selected["slice"].eq(2).all()
 
 
-def test_select_preprocessing_labels_applies_split_counts_then_middle_slices():
+def test_select_preprocessing_labels_keeps_all_slices_without_light():
+    selected = select_preprocessing_labels(_labels())
+
+    assert selected.groupby(["folder", "fastmri_rawfile"])["slice"].nunique().eq(2).all()
+    assert len(selected) == len(_labels())
+
+
+def test_select_preprocessing_labels_applies_split_counts_then_middle_slices_for_light():
     selected = select_preprocessing_labels(
         _labels(),
         split_exam_counts={"training": 2, "validation": 1, "test": 1},
+        middle_slice_only=True,
     )
 
     exam_counts = selected.groupby("data_split")["fastmri_rawfile"].nunique().to_dict()
@@ -190,7 +198,7 @@ def test_reconstruct_selected_t2_file_writes_single_acquisition_slice(tmp_path):
         centered_ifft=centered_ifft,
         grappa_fill=grappa_fill,
         kernel_size=(3, 3),
-        slice_one_based=3,
+        slice_numbers_one_based=(3,),
     )
 
     assert result.image_complex_shape == (1, 1, 2, 4, 4)
@@ -200,7 +208,7 @@ def test_reconstruct_selected_t2_file_writes_single_acquisition_slice(tmp_path):
         assert "kspace_grappa" not in h5
         assert h5.attrs["subset_reconstruction"] == np.True_
         assert h5.attrs["selected_acquisition_index"] == 1
-        assert h5.attrs["selected_slice_index"] == 2
+        assert h5.attrs["selected_slice_indices"].tolist() == [2]
 
 
 def test_reconstruct_t2_dataset_skips_failed_files(tmp_path, monkeypatch):
@@ -240,7 +248,7 @@ def test_reconstruct_t2_dataset_skips_failed_files(tmp_path, monkeypatch):
             original_shape=(3, 4, 2, 4, 4),
             image_complex_shape=(1, 1, 2, 4, 4),
             acquisition_index=1,
-            slice_index=2,
+            slice_indices=(2,),
         )
 
     monkeypatch.setattr(preprocess, "reconstruct_selected_t2_file", fake_reconstruct)
@@ -285,15 +293,19 @@ def test_make_npz_dataset_skips_missing_reconstructions(tmp_path):
     recon_path = recon_root / folder / "file_prostate_AXT2_001_complex_recon.h5"
     recon_path.parent.mkdir(parents=True)
     with h5py.File(recon_path, "w") as h5:
-        h5.create_dataset("image_complex", data=np.ones((1, 1, 2, 4, 4), dtype=np.complex64))
+        h5.create_dataset("image_complex", data=np.ones((1, 2, 2, 4, 4), dtype=np.complex64))
         h5.attrs["selected_acquisition_index"] = 1
-        h5.attrs["selected_slice_index"] = 1
+        h5.attrs["selected_slice_indices"] = np.array([0, 1], dtype=np.int32)
 
     npz_root = tmp_path / "npz"
     manifest_path = make_npz_dataset(labels_path, recon_root, npz_root, crop_size=4, max_coils=1)
 
     manifest = pd.read_csv(manifest_path)
-    assert manifest["fastmri_rawfile"].tolist() == ["file_prostate_AXT2_001.h5"]
+    assert manifest["fastmri_rawfile"].tolist() == [
+        "file_prostate_AXT2_001.h5",
+        "file_prostate_AXT2_001.h5",
+    ]
+    assert manifest["slice"].tolist() == [1, 2]
     failures = pd.read_csv(npz_root / "failed_npz.csv")
     assert failures["fastmri_rawfile"].tolist() == ["file_prostate_AXT2_002.h5"]
     assert failures["error_type"].tolist() == ["FileNotFoundError"]

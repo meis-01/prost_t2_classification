@@ -136,8 +136,9 @@ Download and extract labels plus T2 tarballs:
 prost-t2 download --download-script .\prostate_download_script.txt --download-dir D:\fastmri_prostate\archives --extract-dir D:\fastmri_prostate\raw
 ```
 
-Run selected middle-acquisition/middle-slice GRAPPA/IFFT reconstruction with
-`fastmri-tools`:
+Run selected middle-acquisition GRAPPA/IFFT reconstruction with
+`fastmri-tools`. Regular mode reconstructs all labeled slices; `--light`
+reconstructs one middle labeled slice per exam:
 
 ```powershell
 prost-t2 reconstruct --raw-root D:\fastmri_prostate\raw --labels D:\fastmri_prostate\raw --recon-dir D:\fastmri_prostate\recon_t2
@@ -169,11 +170,13 @@ prost-t2 train --manifest D:\fastmri_prostate\npz_t2_coils\manifest.csv --runs-d
 - The official `data_split` column is used directly, and patient leakage across
   train/validation/test is checked before training.
 - Before reconstruction, each selected T2 raw file is reduced to the middle
-  acquisition (`shape[0] // 2`) and the middle labeled slice for that exam.
-- The selected k-space slice is reconstructed through `fastmri-tools` GRAPPA and
-  centered IFFT primitives, producing a compact complex `image_complex` array.
+  acquisition (`shape[0] // 2`). Regular runs keep all labeled slices for the
+  exam; `--light` keeps only the middle labeled slice.
+- The selected k-space slices are reconstructed through `fastmri-tools` GRAPPA
+  and centered IFFT primitives, producing a compact complex `image_complex`
+  array with one acquisition and the selected slices.
 - Up to five coils are selected using highest image-space energy, measured on
-  the reconstructed selected acquisition/slice only.
+  the reconstructed slice being written as that NPZ sample.
 - Each NPZ stores `image_complex` with shape `(coils, height, width)` plus
   patient, slice, split, acquisition, and coil metadata.
 

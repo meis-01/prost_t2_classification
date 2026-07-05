@@ -31,7 +31,7 @@ SKIPPABLE_DATA_ERRORS = (OSError, RuntimeError, KeyError, ValueError)
 class ReconstructionJob:
     input_path: Path
     output_path: Path
-    slice_one_based: Optional[int] = None
+    slice_numbers_one_based: Optional[Tuple[int, ...]] = None
 
 
 @dataclass(frozen=True)
@@ -41,7 +41,7 @@ class ReconstructionResult:
     original_shape: Tuple[int, ...]
     image_complex_shape: Tuple[int, ...]
     acquisition_index: int
-    slice_index: int
+    slice_indices: Tuple[int, ...]
 
 
 def iter_t2_h5_files(raw_root: Path) -> List[Path]:
@@ -57,30 +57,31 @@ def build_reconstruction_jobs(
     recon_root: Path,
     selected_labels=None,
 ) -> List[ReconstructionJob]:
-    selection_by_key: Dict[tuple[str, str], int] = {}
-    selection_by_rawfile: Dict[str, int] = {}
+    selection_by_key: Dict[tuple[str, str], List[int]] = {}
+    selection_by_rawfile: Dict[str, List[int]] = {}
     if selected_labels is not None:
         for row in selected_labels[["folder", "fastmri_rawfile", "slice"]].itertuples(index=False):
             key = normalize_exam_key(str(row.folder), str(row.fastmri_rawfile))
             slice_one_based = int(row.slice)
-            selection_by_key[key] = slice_one_based
-            selection_by_rawfile[key[1]] = slice_one_based
+            selection_by_key.setdefault(key, []).append(slice_one_based)
+            selection_by_rawfile.setdefault(key[1], []).append(slice_one_based)
 
     jobs: List[ReconstructionJob] = []
     for input_path in iter_t2_h5_files(raw_root):
         relative_parent = input_path.parent.relative_to(raw_root)
         output_path = recon_root / relative_parent / f"{input_path.stem}_complex_recon.h5"
-        slice_one_based = None
+        slice_numbers_one_based = None
         if selected_labels is not None:
             key = normalize_exam_key(relative_parent.as_posix(), input_path.name)
-            slice_one_based = selection_by_key.get(key, selection_by_rawfile.get(input_path.name))
-            if slice_one_based is None:
+            selected_slices = selection_by_key.get(key, selection_by_rawfile.get(input_path.name))
+            if selected_slices is None:
                 continue
+            slice_numbers_one_based = tuple(sorted(set(selected_slices)))
         jobs.append(
             ReconstructionJob(
                 input_path=input_path,
                 output_path=output_path,
-                slice_one_based=slice_one_based,
+                slice_numbers_one_based=slice_numbers_one_based,
             )
         )
     return jobs
@@ -127,7 +128,7 @@ def reconstruct_t2_dataset(
                 centered_ifft=centered_ifft,
                 grappa_fill=grappa_fill,
                 kernel_size=kernel_size,
-                slice_one_based=job.slice_one_based,
+                slice_numbers_one_based=job.slice_numbers_one_based,
             )
         except SKIPPABLE_DATA_ERRORS as exc:
             job.output_path.unlink(missing_ok=True)
@@ -135,7 +136,7 @@ def reconstruct_t2_dataset(
                 {
                     "input_path": str(job.input_path),
                     "output_path": str(job.output_path),
-                    "slice": job.slice_one_based if job.slice_one_based is not None else "",
+                    "slices": ";".join(map(str, job.slice_numbers_one_based or ())),
                     "error_type": type(exc).__name__,
                     "error": str(exc),
                 }
@@ -149,11 +150,11 @@ def reconstruct_t2_dataset(
             continue
         outputs.append(job.output_path)
         logger.info(
-            "Reconstructed %s -> %s acquisition=%d slice=%d image_shape=%s",
+            "Reconstructed %s -> %s acquisition=%d slice_count=%d image_shape=%s",
             result.source_path,
             result.output_path,
             result.acquisition_index,
-            result.slice_index + 1,
+            len(result.slice_indices),
             result.image_complex_shape,
         )
     write_optional_csv(failure_path, failures)
@@ -171,7 +172,7 @@ def reconstruct_selected_t2_file(
     centered_ifft,
     grappa_fill,
     kernel_size: Tuple[int, int],
-    slice_one_based: Optional[int],
+    slice_numbers_one_based: Optional[Iterable[int]],
 ) -> ReconstructionResult:
     with h5py.File(input_path, "r") as h5:
         if "kspace" not in h5:
@@ -194,70 +195,102 @@ def reconstruct_selected_t2_file(
 
         original_shape = tuple(kspace_dataset.shape)
         acquisition_index = middle_acquisition_index(original_shape[0])
-        slice_index = slice_one_based - 1 if slice_one_based is not None else original_shape[1] // 2
-        if slice_index < 0 or slice_index >= original_shape[1]:
-            raise ValueError(
-                f"Selected slice {slice_index + 1} is out of range for {input_path} with shape {original_shape}."
-            )
-
-        kspace = _as_complex(kspace_dataset[acquisition_index : acquisition_index + 1, slice_index : slice_index + 1])
-        calibration = _as_complex(calibration_dataset[slice_index : slice_index + 1])
+        slice_indices = selected_slice_indices(slice_numbers_one_based, original_shape[1], input_path)
         source_attrs = {key: _attr_value(value) for key, value in h5.attrs.items()}
 
-    image_complex = centered_ifft(
-        grappa_fill(kspace, calibration, kernel_size=kernel_size),
-        axes=(-2, -1),
-    ).astype(np.complex64, copy=False)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        image_complex_shape: Tuple[int, ...] | None = None
+        with h5py.File(output_path, "w") as output_h5:
+            write_reconstruction_metadata(
+                output_h5,
+                source_path=input_path,
+                source_attrs=source_attrs,
+                original_shape=original_shape,
+                acquisition_index=acquisition_index,
+                slice_indices=slice_indices,
+            )
+            image_dataset = None
+            for output_slice_index, source_slice_index in enumerate(slice_indices):
+                kspace = _as_complex(
+                    kspace_dataset[
+                        acquisition_index : acquisition_index + 1,
+                        source_slice_index : source_slice_index + 1,
+                    ]
+                )
+                calibration = _as_complex(calibration_dataset[source_slice_index : source_slice_index + 1])
+                image_complex = centered_ifft(
+                    grappa_fill(kspace, calibration, kernel_size=kernel_size),
+                    axes=(-2, -1),
+                ).astype(np.complex64, copy=False)
 
-    write_selected_reconstruction(
-        output_path,
-        source_path=input_path,
-        source_attrs=source_attrs,
-        original_shape=original_shape,
-        image_complex=image_complex,
-        acquisition_index=acquisition_index,
-        slice_index=slice_index,
-    )
+                if image_dataset is None:
+                    image_complex_shape = (1, len(slice_indices), *image_complex.shape[2:])
+                    image_dataset = output_h5.create_dataset(
+                        "image_complex",
+                        shape=image_complex_shape,
+                        dtype=image_complex.dtype,
+                    )
+                image_dataset[:, output_slice_index : output_slice_index + 1] = image_complex
+
+    if image_complex_shape is None:
+        raise ValueError(f"No slices selected for {input_path}.")
 
     return ReconstructionResult(
         source_path=Path(input_path),
         output_path=Path(output_path),
         original_shape=original_shape,
-        image_complex_shape=tuple(image_complex.shape),
+        image_complex_shape=image_complex_shape,
         acquisition_index=acquisition_index,
-        slice_index=slice_index,
+        slice_indices=slice_indices,
     )
 
 
-def write_selected_reconstruction(
-    output_path: Path,
+def selected_slice_indices(
+    slice_numbers_one_based: Optional[Iterable[int]],
+    num_slices: int,
+    input_path: Path,
+) -> Tuple[int, ...]:
+    if num_slices <= 0:
+        raise ValueError(f"{input_path} has no slices.")
+    if slice_numbers_one_based is None:
+        return tuple(range(num_slices))
+
+    indices = tuple(sorted({int(slice_number) - 1 for slice_number in slice_numbers_one_based}))
+    if not indices:
+        raise ValueError(f"No slices selected for {input_path}.")
+    invalid = [index + 1 for index in indices if index < 0 or index >= num_slices]
+    if invalid:
+        raise ValueError(
+            f"Selected slice(s) {invalid} are out of range for {input_path} with {num_slices} slices."
+        )
+    return indices
+
+
+def write_reconstruction_metadata(
+    h5: h5py.File,
     *,
     source_path: Path,
     source_attrs: Mapping[str, Any],
     original_shape: Tuple[int, ...],
-    image_complex: np.ndarray,
     acquisition_index: int,
-    slice_index: int,
+    slice_indices: Tuple[int, ...],
 ) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with h5py.File(output_path, "w") as h5:
-        h5.create_dataset("image_complex", data=image_complex)
-        h5.attrs["source_file"] = str(source_path)
-        h5.attrs["sequence"] = "t2"
-        h5.attrs["original_kspace_shape"] = ",".join(map(str, original_shape))
-        h5.attrs["complex_output"] = True
-        h5.attrs["spatial_fft_axes"] = "readout,phase"
-        h5.attrs["subset_reconstruction"] = True
-        h5.attrs["selected_acquisition_index"] = acquisition_index
-        h5.attrs["selected_slice_index"] = slice_index
-        h5.attrs["selected_slice"] = slice_index + 1
+    h5.attrs["source_file"] = str(source_path)
+    h5.attrs["sequence"] = "t2"
+    h5.attrs["original_kspace_shape"] = ",".join(map(str, original_shape))
+    h5.attrs["complex_output"] = True
+    h5.attrs["spatial_fft_axes"] = "readout,phase"
+    h5.attrs["subset_reconstruction"] = True
+    h5.attrs["selected_acquisition_index"] = acquisition_index
+    h5.attrs["selected_slice_indices"] = np.asarray(slice_indices, dtype=np.int32)
+    h5.attrs["selected_slices"] = np.asarray([index + 1 for index in slice_indices], dtype=np.int32)
 
-        source_attrs_group = h5.create_group("source_attrs")
-        for key, value in source_attrs.items():
-            if _is_hdf5_attr_value(value):
-                source_attrs_group.attrs[key] = value
-            else:
-                source_attrs_group.attrs[key] = str(value)
+    source_attrs_group = h5.create_group("source_attrs")
+    for key, value in source_attrs.items():
+        if _is_hdf5_attr_value(value):
+            source_attrs_group.attrs[key] = value
+        else:
+            source_attrs_group.attrs[key] = str(value)
 
 
 def _as_complex(array: np.ndarray) -> np.ndarray:
@@ -287,22 +320,28 @@ def read_selected_reconstruction_slice(
     requested_slice_index: int,
 ) -> tuple[np.ndarray, int]:
     image_dataset = h5["image_complex"]
-    if image_dataset.ndim != 5 or image_dataset.shape[:2] != (1, 1):
+    if image_dataset.ndim != 5 or image_dataset.shape[0] != 1:
         raise ValueError(
-            f"{recon_path} must be rebuilt with selected-slice reconstruction; "
+            f"{recon_path} must be rebuilt with selected-acquisition reconstruction; "
             f"found image_complex shape {image_dataset.shape}."
         )
-    if "selected_slice_index" not in h5.attrs or "selected_acquisition_index" not in h5.attrs:
+    if "selected_slice_indices" not in h5.attrs or "selected_acquisition_index" not in h5.attrs:
         raise ValueError(f"{recon_path} is missing selected reconstruction metadata.")
 
-    stored_slice_index = int(h5.attrs["selected_slice_index"])
-    if stored_slice_index != requested_slice_index:
+    selected_indices = tuple(int(index) for index in np.asarray(h5.attrs["selected_slice_indices"]).reshape(-1))
+    try:
+        output_slice_index = selected_indices.index(requested_slice_index)
+    except ValueError as exc:
         raise ValueError(
-            f"{recon_path} contains selected slice {stored_slice_index + 1}, but labels request "
-            f"slice {requested_slice_index + 1}. Re-run reconstruction with the same labels."
+            f"{recon_path} does not contain requested slice {requested_slice_index + 1}. "
+            "Re-run reconstruction with the same labels."
+        ) from exc
+    if output_slice_index >= image_dataset.shape[1]:
+        raise ValueError(
+            f"{recon_path} selected-slice metadata does not match image_complex shape {image_dataset.shape}."
         )
     acquisition_index = int(h5.attrs["selected_acquisition_index"])
-    return np.asarray(image_dataset[0, 0]), acquisition_index
+    return np.asarray(image_dataset[0, output_slice_index]), acquisition_index
 
 
 def make_npz_dataset(
@@ -324,6 +363,7 @@ def make_npz_dataset(
         split_exam_counts=split_exam_counts,
         limit_patients=limit_patients,
         limit_slices=limit_slices,
+        middle_slice_only=split_exam_counts is not None,
     )
 
     npz_root.mkdir(parents=True, exist_ok=True)

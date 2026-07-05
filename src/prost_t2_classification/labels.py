@@ -142,6 +142,7 @@ def select_preprocessing_labels(
     split_exam_counts: Mapping[str, int] | None = None,
     limit_patients: int | None = None,
     limit_slices: int | None = None,
+    middle_slice_only: bool = False,
 ) -> pd.DataFrame:
     assert_patient_split_disjoint(labels)
 
@@ -151,7 +152,8 @@ def select_preprocessing_labels(
         keep_patients = sorted(labels["fastmri_pt_id"].unique())[:limit_patients]
         labels = labels[labels["fastmri_pt_id"].isin(keep_patients)].copy()
 
-    labels = select_middle_slices(labels)
+    if middle_slice_only:
+        labels = select_middle_slices(labels)
     if limit_slices is not None:
         labels = labels.head(limit_slices).copy()
     return labels

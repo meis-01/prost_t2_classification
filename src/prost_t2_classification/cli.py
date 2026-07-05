@@ -182,6 +182,7 @@ def select_pipeline_labels(
         split_exam_counts=split_counts,
         limit_patients=limit_patients,
         limit_slices=limit_slices,
+        middle_slice_only=split_counts is not None,
     )
 
 
