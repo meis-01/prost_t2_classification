@@ -1,7 +1,14 @@
+from datetime import datetime, timezone
+
 import pandas as pd
 import pytest
 
-from prost_t2_classification.download import DownloadEntry, select_entries_for_rawfiles
+from prost_t2_classification.download import (
+    DownloadEntry,
+    presigned_url_expiration,
+    select_entries_for_rawfiles,
+    validate_download_url,
+)
 from prost_t2_classification.labels import (
     parse_split_exam_counts,
     select_split_exams,
@@ -61,3 +68,29 @@ def test_select_entries_for_rawfiles_matches_outputs_and_urls():
     )
 
     assert selected == entries[:2]
+
+
+def test_presigned_url_expiration_supports_s3_expiry_formats():
+    assert presigned_url_expiration("https://example.test/file.h5?Expires=1782750295") == datetime(
+        2026,
+        6,
+        29,
+        16,
+        24,
+        55,
+        tzinfo=timezone.utc,
+    )
+    assert presigned_url_expiration(
+        "https://example.test/file.h5?X-Amz-Date=20260705T100000Z&X-Amz-Expires=60"
+    ) == datetime(2026, 7, 5, 10, 1, tzinfo=timezone.utc)
+
+
+def test_validate_download_url_raises_for_expired_signed_url():
+    entry = DownloadEntry(
+        "https://example.test/labels.tar.gz?Expires=1",
+        "labels.tar.gz",
+        "labels",
+    )
+
+    with pytest.raises(ValueError, match="expired on 1970-01-01 00:00:01 UTC"):
+        validate_download_url(entry)

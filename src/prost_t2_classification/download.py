@@ -5,9 +5,10 @@ import shutil
 import subprocess
 import tarfile
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from typing import Iterable, List, Sequence, Set
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 from .logging_utils import get_logger
 
@@ -68,6 +69,7 @@ def download_entries(
     paths: List[Path] = []
 
     for entry in entries:
+        validate_download_url(entry)
         output_path = download_dir / entry.output
         output_path.parent.mkdir(parents=True, exist_ok=True)
         paths.append(output_path)
@@ -88,7 +90,14 @@ def download_entries(
             "--output",
             str(output_path),
         ]
-        subprocess.run(command, check=True)
+        try:
+            subprocess.run(command, check=True)
+        except subprocess.CalledProcessError as exc:
+            raise ValueError(
+                f"curl failed with exit code {exc.returncode} while downloading {entry.output} "
+                f"from {redact_url(entry.url)}. Check your network connection and regenerate the "
+                "fastMRI download script if the link has expired."
+            ) from exc
 
     return paths
 
@@ -179,6 +188,51 @@ def entry_filenames(entry: DownloadEntry) -> Set[str]:
         PurePosixPath(entry.output).name,
         PurePosixPath(url_path).name,
     }
+
+
+def validate_download_url(entry: DownloadEntry) -> None:
+    expiration = presigned_url_expiration(entry.url)
+    if expiration is None:
+        return
+
+    now = datetime.now(timezone.utc)
+    if expiration <= now:
+        raise ValueError(
+            f"The download URL for {entry.output} expired on {format_utc(expiration)}. "
+            "fastMRI download links are time-limited; request a fresh prostate download script "
+            "from fastMRI and rerun the command."
+        )
+
+
+def presigned_url_expiration(url: str) -> datetime | None:
+    query = parse_qs(urlsplit(url).query)
+    expires = first_query_value(query, "Expires")
+    if expires is not None:
+        try:
+            return datetime.fromtimestamp(int(expires), timezone.utc)
+        except ValueError:
+            return None
+
+    amz_date = first_query_value(query, "X-Amz-Date")
+    amz_expires = first_query_value(query, "X-Amz-Expires")
+    if amz_date is None or amz_expires is None:
+        return None
+    try:
+        issued_at = datetime.strptime(amz_date, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+        return issued_at + timedelta(seconds=int(amz_expires))
+    except ValueError:
+        return None
+
+
+def first_query_value(query: dict[str, list[str]], key: str) -> str | None:
+    values = query.get(key)
+    if not values:
+        return None
+    return values[0]
+
+
+def format_utc(value: datetime) -> str:
+    return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
 def redact_url(url: str) -> str:
