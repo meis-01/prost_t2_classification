@@ -1,8 +1,10 @@
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pandas as pd
 import pytest
 
+from prost_t2_classification.cli import build_parser
 from prost_t2_classification.download import (
     DownloadEntry,
     presigned_url_expiration,
@@ -94,3 +96,25 @@ def test_validate_download_url_raises_for_expired_signed_url():
 
     with pytest.raises(ValueError, match="expired on 1970-01-01 00:00:01 UTC"):
         validate_download_url(entry)
+
+
+def test_run_accepts_separate_labels_path():
+    args = build_parser().parse_args(
+        [
+            "run",
+            "--light",
+            "--skip-download",
+            "--extract-dir",
+            "D:/fastmri_prostate/T2",
+            "--labels",
+            "D:/fastmri_prostate/labels",
+            "--recon-dir",
+            "D:/fastmri_prostate_light/recon_t2",
+            "--npz-dir",
+            "D:/fastmri_prostate_light/npz_t2_coils",
+            "--runs-dir",
+            "D:/fastmri_prostate_light/runs",
+        ]
+    )
+
+    assert args.labels == Path("D:/fastmri_prostate/labels")

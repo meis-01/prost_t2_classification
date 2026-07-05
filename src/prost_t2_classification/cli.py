@@ -98,6 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--download-script", type=Path, default=Path("prostate_download_script.txt"))
     run_parser.add_argument("--download-dir", type=Path, default=None)
     run_parser.add_argument("--extract-dir", type=Path, default=None)
+    run_parser.add_argument("--labels", type=Path, default=None, help="Label CSV or directory; defaults to extracted raw data")
     run_parser.add_argument("--recon-dir", type=Path, default=None)
     run_parser.add_argument("--npz-dir", type=Path, default=None)
     run_parser.add_argument("--runs-dir", type=Path, default=None)
@@ -355,6 +356,7 @@ def cmd_run(args) -> int:
         if needs_runs_dir
         else args.runs_dir
     )
+    labels_path = args.labels or extract_dir
 
     selected_exams = None
     if not args.skip_download:
@@ -375,7 +377,7 @@ def cmd_run(args) -> int:
             )
             selected_exams = exam_keys_from_labels(selected_labels)
     elif light_counts is not None and (not args.skip_reconstruct or not args.skip_npz):
-        selected_labels = select_light_labels(extract_dir, light_counts)
+        selected_labels = select_light_labels(labels_path, light_counts)
         selected_exams = exam_keys_from_labels(selected_labels)
 
     if not args.skip_reconstruct:
@@ -394,7 +396,7 @@ def cmd_run(args) -> int:
         from .preprocess import make_npz_dataset
 
         manifest = make_npz_dataset(
-            extract_dir,
+            labels_path,
             recon_dir,
             npz_dir,
             crop_size=args.crop_size,

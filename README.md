@@ -73,6 +73,22 @@ only matching T2 H5 entries when the provided download script has one T2 curl
 command per exam. If the script only exposes archive-level T2 tarballs, the
 command exits before downloading the full T2 archives.
 
+If the raw T2 files and labels are already downloaded and expanded, skip the
+download stage:
+
+```powershell
+prost-t2 run `
+  --light `
+  --skip-download `
+  --extract-dir D:\fastmri_prostate\T2 `
+  --labels D:\fastmri_prostate\labels `
+  --recon-dir D:\fastmri_prostate_light\recon_t2 `
+  --npz-dir D:\fastmri_prostate_light\npz_t2_coils `
+  --runs-dir D:\fastmri_prostate_light\runs `
+  --epochs 1 `
+  --batch-size 4
+```
+
 ## Full Pipeline
 
 The full command prompts for storage locations if you omit them:
