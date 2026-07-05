@@ -38,6 +38,41 @@ python -m venv .venv
 For CUDA training, install the PyTorch build that matches your GPU/driver before
 or after the editable install.
 
+## Light Laptop Pipeline
+
+Use `--light` to run the pipeline on 20 T2 MRI exams selected from the official
+split labels: 10 training, 5 validation, and 5 test exams.
+
+```powershell
+prost-t2 run `
+  --light `
+  --download-script .\prostate_download_script.txt `
+  --download-dir D:\fastmri_prostate_light\archives `
+  --extract-dir D:\fastmri_prostate_light\raw `
+  --recon-dir D:\fastmri_prostate_light\recon_t2 `
+  --npz-dir D:\fastmri_prostate_light\npz_t2_coils `
+  --runs-dir D:\fastmri_prostate_light\runs `
+  --epochs 1 `
+  --batch-size 4
+```
+
+Equivalent helper script:
+
+```powershell
+.\scripts\run_light_pipeline.ps1 `
+  -DownloadScript .\prostate_download_script.txt `
+  -DownloadDir D:\fastmri_prostate_light\archives `
+  -ExtractDir D:\fastmri_prostate_light\raw `
+  -ReconDir D:\fastmri_prostate_light\recon_t2 `
+  -NpzDir D:\fastmri_prostate_light\npz_t2_coils `
+  -RunsDir D:\fastmri_prostate_light\runs
+```
+
+Light mode downloads the labels first, chooses the 20 exams, and then downloads
+only matching T2 H5 entries when the provided download script has one T2 curl
+command per exam. If the script only exposes archive-level T2 tarballs, the
+command exits before downloading the full T2 archives.
+
 ## Full Pipeline
 
 The full command prompts for storage locations if you omit them:
@@ -72,7 +107,7 @@ prost-t2 run `
 
 ## Individual Stages
 
-Download labels and T2 tarballs only:
+Download labels and T2 archives/files only:
 
 ```powershell
 prost-t2 download --download-script .\prostate_download_script.txt --download-dir D:\fastmri_prostate\archives --no-extract

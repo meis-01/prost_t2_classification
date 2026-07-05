@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 
 import h5py
 import numpy as np
@@ -15,7 +15,13 @@ from .image_ops import (
     pad_coil_axis,
     top_energy_coils_from_stream,
 )
-from .labels import assert_patient_split_disjoint, load_t2_labels, resolve_reconstruction_path
+from .labels import (
+    assert_patient_split_disjoint,
+    load_t2_labels,
+    normalize_exam_key,
+    resolve_reconstruction_path,
+    select_split_exams,
+)
 from .logging_utils import get_logger
 
 
@@ -49,6 +55,7 @@ def reconstruct_t2_dataset(
     kernel_size: Tuple[int, int] = (5, 5),
     skip_existing: bool = True,
     limit: Optional[int] = None,
+    selected_exams: Optional[Iterable[tuple[str, str]]] = None,
 ) -> List[Path]:
     logger = get_logger()
     try:
@@ -59,6 +66,21 @@ def reconstruct_t2_dataset(
         ) from exc
 
     jobs = build_reconstruction_jobs(raw_root, recon_root)
+    if selected_exams is not None:
+        selected = {normalize_exam_key(folder, rawfile) for folder, rawfile in selected_exams}
+        selected_rawfiles = {rawfile for _, rawfile in selected}
+        jobs = [
+            job
+            for job in jobs
+            if (
+                job_key := normalize_exam_key(
+                    job.input_path.parent.relative_to(raw_root).as_posix(),
+                    job.input_path.name,
+                )
+            )
+            in selected
+            or job_key[1] in selected_rawfiles
+        ]
     if limit is not None:
         jobs = jobs[:limit]
     if not jobs:
@@ -97,11 +119,14 @@ def make_npz_dataset(
     overwrite: bool = False,
     limit_patients: Optional[int] = None,
     limit_slices: Optional[int] = None,
+    split_exam_counts: Optional[Mapping[str, int]] = None,
 ) -> Path:
     logger = get_logger()
     labels = load_t2_labels(labels_path)
     assert_patient_split_disjoint(labels)
 
+    if split_exam_counts is not None:
+        labels = select_split_exams(labels, split_exam_counts)
     if limit_patients is not None:
         keep_patients = sorted(labels["fastmri_pt_id"].unique())[:limit_patients]
         labels = labels[labels["fastmri_pt_id"].isin(keep_patients)].copy()

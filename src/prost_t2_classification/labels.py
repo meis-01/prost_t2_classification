@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Set
+from typing import Dict, Mapping, Set
 
 import pandas as pd
 
@@ -13,6 +13,21 @@ REQUIRED_T2_COLUMNS = {
     "fastmri_rawfile",
     "data_split",
     "folder",
+}
+
+DEFAULT_LIGHT_SPLIT_EXAM_COUNTS = {
+    "training": 10,
+    "validation": 5,
+    "test": 5,
+}
+
+_SPLIT_ALIASES = {
+    "train": "training",
+    "training": "training",
+    "val": "validation",
+    "valid": "validation",
+    "validation": "validation",
+    "test": "test",
 }
 
 
@@ -43,6 +58,90 @@ def load_t2_labels(path: Path) -> pd.DataFrame:
     df["label"] = (df["PIRADS"] > 2).astype(int)
     df["data_split"] = df["data_split"].astype(str).str.lower()
     return df
+
+
+def parse_split_exam_counts(value: str | None) -> Dict[str, int]:
+    if value is None:
+        return dict(DEFAULT_LIGHT_SPLIT_EXAM_COUNTS)
+
+    counts: Dict[str, int] = {}
+    for item in value.split(","):
+        if "=" not in item:
+            raise ValueError("split counts must look like 'training=10,validation=5,test=5'.")
+        split, raw_count = item.split("=", 1)
+        split = normalize_split_name(split.strip())
+        try:
+            count = int(raw_count.strip())
+        except ValueError as exc:
+            raise ValueError(f"Invalid exam count for {split!r}: {raw_count!r}") from exc
+        if count < 0:
+            raise ValueError("split exam counts must be non-negative.")
+        counts[split] = count
+
+    if not counts:
+        raise ValueError("At least one split exam count is required.")
+    return counts
+
+
+def normalize_split_name(value: str) -> str:
+    key = value.strip().lower()
+    if key not in _SPLIT_ALIASES:
+        raise ValueError(f"Unknown split {value!r}; expected training, validation, or test.")
+    return _SPLIT_ALIASES[key]
+
+
+def select_split_exams(labels: pd.DataFrame, split_counts: Mapping[str, int]) -> pd.DataFrame:
+    normalized_counts = {
+        normalize_split_name(split): int(count)
+        for split, count in split_counts.items()
+        if int(count) > 0
+    }
+    selected_keys = set()
+
+    for split, count in normalized_counts.items():
+        split_labels = labels[labels["data_split"].astype(str).str.lower() == split]
+        exams = (
+            split_labels[["folder", "fastmri_rawfile"]]
+            .drop_duplicates()
+            .sort_values(["folder", "fastmri_rawfile"])
+            .head(count)
+        )
+        if len(exams) < count:
+            raise ValueError(
+                f"Requested {count} {split} exams, but only found {len(exams)} in the T2 labels."
+            )
+        selected_keys.update(
+            normalize_exam_key(str(row.folder), str(row.fastmri_rawfile))
+            for row in exams.itertuples(index=False)
+        )
+
+    selected = labels[
+        labels.apply(
+            lambda row: normalize_exam_key(str(row["folder"]), str(row["fastmri_rawfile"])) in selected_keys,
+            axis=1,
+        )
+    ].copy()
+    if selected.empty:
+        raise ValueError("No labels remain after applying split exam counts.")
+    return selected
+
+
+def exam_keys_from_labels(labels: pd.DataFrame) -> Set[tuple[str, str]]:
+    return {
+        normalize_exam_key(str(row.folder), str(row.fastmri_rawfile))
+        for row in labels[["folder", "fastmri_rawfile"]].drop_duplicates().itertuples(index=False)
+    }
+
+
+def rawfile_names_from_labels(labels: pd.DataFrame) -> Set[str]:
+    return {rawfile for _, rawfile in exam_keys_from_labels(labels)}
+
+
+def normalize_exam_key(folder: str, rawfile: str) -> tuple[str, str]:
+    normalized_folder = Path(folder).as_posix().strip("/")
+    if normalized_folder == ".":
+        normalized_folder = ""
+    return normalized_folder, Path(rawfile).name
 
 
 def patient_split_sets(labels: pd.DataFrame) -> Dict[str, Set[int]]:

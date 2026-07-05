@@ -5,7 +5,22 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from .download import download_entries, extract_archives, parse_prostate_download_script
+from .download import (
+    DownloadEntry,
+    download_entries,
+    extract_archives,
+    is_archive_path,
+    parse_prostate_download_script,
+    select_entries_for_rawfiles,
+)
+from .labels import (
+    DEFAULT_LIGHT_SPLIT_EXAM_COUNTS,
+    exam_keys_from_labels,
+    load_t2_labels,
+    parse_split_exam_counts,
+    rawfile_names_from_labels,
+    select_split_exams,
+)
 from .logging_utils import configure_logging
 
 
@@ -33,6 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     download_parser.add_argument("--overwrite", action="store_true")
     download_parser.add_argument("--no-extract", action="store_true")
     download_parser.add_argument("--dry-run", action="store_true")
+    add_light_args(download_parser)
     download_parser.set_defaults(func=cmd_download)
 
     recon_parser = subparsers.add_parser("reconstruct", help="Run fastmri-tools reconstruction for T2 H5 files")
@@ -52,6 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
     npz_parser.add_argument("--overwrite", action="store_true")
     npz_parser.add_argument("--limit-patients", type=int, default=None)
     npz_parser.add_argument("--limit-slices", type=int, default=None)
+    add_light_args(npz_parser)
     npz_parser.set_defaults(func=cmd_make_npz)
 
     prepare_parser = subparsers.add_parser(
@@ -70,6 +87,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--limit", type=int, default=None, help="Limit reconstructed files for smoke tests")
     prepare_parser.add_argument("--limit-patients", type=int, default=None)
     prepare_parser.add_argument("--limit-slices", type=int, default=None)
+    add_light_args(prepare_parser)
     prepare_parser.set_defaults(func=cmd_prepare_npz)
 
     train_parser = subparsers.add_parser("train", help="Train real, complex, or both classifiers")
@@ -92,6 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--crop-size", type=int, default=224)
     run_parser.add_argument("--max-coils", type=int, default=5)
     run_parser.add_argument("--kernel-size", default="5,5")
+    add_light_args(run_parser)
     add_train_args(run_parser, include_manifest=False, include_runs_dir=False)
     run_parser.set_defaults(func=cmd_run)
     return parser
@@ -118,13 +137,115 @@ def add_train_args(
     parser.add_argument("--device", default=None)
 
 
+def add_light_args(parser: argparse.ArgumentParser) -> None:
+    default = ",".join(f"{split}={count}" for split, count in DEFAULT_LIGHT_SPLIT_EXAM_COUNTS.items())
+    parser.add_argument(
+        "--light",
+        action="store_true",
+        help="Use a laptop-sized T2 subset: 10 training, 5 validation, and 5 test exams.",
+    )
+    parser.add_argument(
+        "--light-counts",
+        default=None,
+        help=f"Override --light exam counts, for example '{default}'.",
+    )
+
+
+def light_split_counts_from_args(args) -> Optional[dict[str, int]]:
+    if not getattr(args, "light", False):
+        if getattr(args, "light_counts", None) is not None:
+            raise ValueError("--light-counts requires --light.")
+        return None
+    return parse_split_exam_counts(args.light_counts)
+
+
+def select_light_labels(labels_path: Path, split_counts: dict[str, int]):
+    labels = load_t2_labels(labels_path)
+    return select_split_exams(labels, split_counts)
+
+
+def download_light_subset(
+    entries: list[DownloadEntry],
+    download_dir: Path,
+    extract_dir: Path,
+    *,
+    split_counts: dict[str, int],
+    overwrite: bool = False,
+    dry_run: bool = False,
+    t2_download_dir: Optional[Path] = None,
+    stage_t2: bool = True,
+):
+    label_entries = [entry for entry in entries if entry.kind == "labels"]
+    t2_entries = [entry for entry in entries if entry.kind == "t2"]
+    if not label_entries:
+        raise ValueError("Light mode requires a labels download entry.")
+    if not t2_entries:
+        raise ValueError("Light mode requires T2 download entries.")
+
+    label_paths = download_entries(label_entries, download_dir, overwrite=overwrite, dry_run=dry_run)
+    extract_archives(label_paths, extract_dir, overwrite=overwrite, dry_run=dry_run, source_root=download_dir)
+
+    selected_labels = select_light_labels(extract_dir, split_counts)
+    rawfiles = rawfile_names_from_labels(selected_labels)
+    selected_t2_entries = select_entries_for_rawfiles(t2_entries, rawfiles)
+    validate_light_t2_entries(selected_t2_entries, t2_entries, expected_count=len(rawfiles))
+
+    t2_root = t2_download_dir or download_dir
+    t2_paths = download_entries(selected_t2_entries, t2_root, overwrite=overwrite, dry_run=dry_run)
+    if stage_t2:
+        extract_archives(t2_paths, extract_dir, overwrite=overwrite, dry_run=dry_run, source_root=t2_root)
+    return selected_labels
+
+
+def validate_light_t2_entries(
+    selected_entries: list[DownloadEntry],
+    all_t2_entries: list[DownloadEntry],
+    *,
+    expected_count: int,
+) -> None:
+    if len(selected_entries) >= expected_count:
+        return
+
+    archive_entries = [entry for entry in all_t2_entries if is_archive_path(entry.output)]
+    if archive_entries:
+        raise ValueError(
+            "Light mode can only download exactly selected exams when the download script has one T2 H5 "
+            "curl entry per exam. This script exposes archive-level T2 entries, so refusing to download "
+            "the full T2 archives."
+        )
+    raise ValueError(
+        f"Matched {len(selected_entries)} T2 download entries for {expected_count} selected light exams."
+    )
+
+
 def cmd_download(args) -> int:
     if not args.no_extract and args.extract_dir is None:
         raise ValueError("--extract-dir is required unless --no-extract is set.")
     entries = parse_prostate_download_script(args.download_script)
+
+    light_counts = light_split_counts_from_args(args)
+    if light_counts is not None:
+        if args.no_extract:
+            raise ValueError("--light requires --extract-dir so labels can be read before T2 downloads.")
+        download_light_subset(
+            entries,
+            args.download_dir,
+            args.extract_dir,
+            split_counts=light_counts,
+            overwrite=args.overwrite,
+            dry_run=args.dry_run,
+        )
+        return 0
+
     paths = download_entries(entries, args.download_dir, overwrite=args.overwrite, dry_run=args.dry_run)
     if not args.no_extract:
-        extract_archives(paths, args.extract_dir, overwrite=args.overwrite, dry_run=args.dry_run)
+        extract_archives(
+            paths,
+            args.extract_dir,
+            overwrite=args.overwrite,
+            dry_run=args.dry_run,
+            source_root=args.download_dir,
+        )
     return 0
 
 
@@ -145,6 +266,7 @@ def cmd_reconstruct(args) -> int:
 def cmd_make_npz(args) -> int:
     from .preprocess import make_npz_dataset
 
+    light_counts = light_split_counts_from_args(args)
     make_npz_dataset(
         args.labels,
         args.recon_dir,
@@ -154,12 +276,19 @@ def cmd_make_npz(args) -> int:
         overwrite=args.overwrite,
         limit_patients=args.limit_patients,
         limit_slices=args.limit_slices,
+        split_exam_counts=light_counts,
     )
     return 0
 
 
 def cmd_prepare_npz(args) -> int:
     from .preprocess import make_npz_dataset, reconstruct_t2_dataset
+
+    light_counts = light_split_counts_from_args(args)
+    selected_exams = None
+    if light_counts is not None:
+        selected_labels = select_light_labels(args.labels or args.raw_root, light_counts)
+        selected_exams = exam_keys_from_labels(selected_labels)
 
     if not args.skip_reconstruct:
         reconstruct_t2_dataset(
@@ -168,6 +297,7 @@ def cmd_prepare_npz(args) -> int:
             kernel_size=parse_kernel_size(args.kernel_size),
             skip_existing=not args.overwrite,
             limit=args.limit,
+            selected_exams=selected_exams,
         )
     make_npz_dataset(
         args.labels or args.raw_root,
@@ -178,6 +308,7 @@ def cmd_prepare_npz(args) -> int:
         overwrite=args.overwrite,
         limit_patients=args.limit_patients,
         limit_slices=args.limit_slices,
+        split_exam_counts=light_counts,
     )
     return 0
 
@@ -188,6 +319,10 @@ def cmd_train(args) -> int:
 
 
 def cmd_run(args) -> int:
+    light_counts = light_split_counts_from_args(args)
+    if light_counts is not None and not args.skip_download and args.skip_extract:
+        raise ValueError("--light cannot be combined with --skip-extract while downloading.")
+
     base = Path.cwd()
     needs_download_dir = not args.skip_download
     needs_extract_dir = not args.skip_download or not args.skip_reconstruct or not args.skip_npz
@@ -221,11 +356,27 @@ def cmd_run(args) -> int:
         else args.runs_dir
     )
 
+    selected_exams = None
     if not args.skip_download:
         entries = parse_prostate_download_script(args.download_script)
-        archives = download_entries(entries, download_dir, overwrite=args.overwrite)
-        if not args.skip_extract:
-            extract_archives(archives, extract_dir, overwrite=args.overwrite)
+        if light_counts is None:
+            archives = download_entries(entries, download_dir, overwrite=args.overwrite)
+            if not args.skip_extract:
+                extract_archives(archives, extract_dir, overwrite=args.overwrite, source_root=download_dir)
+        else:
+            selected_labels = download_light_subset(
+                entries,
+                download_dir,
+                extract_dir,
+                split_counts=light_counts,
+                overwrite=args.overwrite,
+                t2_download_dir=extract_dir,
+                stage_t2=False,
+            )
+            selected_exams = exam_keys_from_labels(selected_labels)
+    elif light_counts is not None and (not args.skip_reconstruct or not args.skip_npz):
+        selected_labels = select_light_labels(extract_dir, light_counts)
+        selected_exams = exam_keys_from_labels(selected_labels)
 
     if not args.skip_reconstruct:
         from .preprocess import reconstruct_t2_dataset
@@ -235,6 +386,7 @@ def cmd_run(args) -> int:
             recon_dir,
             kernel_size=parse_kernel_size(args.kernel_size),
             skip_existing=not args.overwrite,
+            selected_exams=selected_exams,
         )
 
     manifest = npz_dir / "manifest.csv" if npz_dir is not None else None
@@ -248,6 +400,7 @@ def cmd_run(args) -> int:
             crop_size=args.crop_size,
             max_coils=args.max_coils,
             overwrite=args.overwrite,
+            split_exam_counts=light_counts,
         )
 
     if not args.skip_train:
