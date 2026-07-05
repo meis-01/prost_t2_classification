@@ -24,6 +24,9 @@ from .labels import (
 from .logging_utils import get_logger
 
 
+SKIPPABLE_DATA_ERRORS = (OSError, RuntimeError, KeyError, ValueError)
+
+
 @dataclass(frozen=True)
 class ReconstructionJob:
     input_path: Path
@@ -108,21 +111,43 @@ def reconstruct_t2_dataset(
         raise FileNotFoundError(f"No T2 H5 files found under {raw_root}.")
 
     outputs: List[Path] = []
+    failures: List[Dict[str, object]] = []
+    failure_path = recon_root / "failed_reconstructions.csv"
     logger.info("Starting selected T2 reconstruction for %d files", len(jobs))
     for job in tqdm(jobs, desc="reconstruct T2"):
-        outputs.append(job.output_path)
         if job.output_path.exists() and skip_existing:
+            outputs.append(job.output_path)
             logger.info("Skipping existing reconstruction %s", job.output_path)
             continue
         job.output_path.parent.mkdir(parents=True, exist_ok=True)
-        result = reconstruct_selected_t2_file(
-            job.input_path,
-            job.output_path,
-            centered_ifft=centered_ifft,
-            grappa_fill=grappa_fill,
-            kernel_size=kernel_size,
-            slice_one_based=job.slice_one_based,
-        )
+        try:
+            result = reconstruct_selected_t2_file(
+                job.input_path,
+                job.output_path,
+                centered_ifft=centered_ifft,
+                grappa_fill=grappa_fill,
+                kernel_size=kernel_size,
+                slice_one_based=job.slice_one_based,
+            )
+        except SKIPPABLE_DATA_ERRORS as exc:
+            job.output_path.unlink(missing_ok=True)
+            failures.append(
+                {
+                    "input_path": str(job.input_path),
+                    "output_path": str(job.output_path),
+                    "slice": job.slice_one_based if job.slice_one_based is not None else "",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                }
+            )
+            logger.warning(
+                "Skipping reconstruction for %s: %s: %s",
+                job.input_path,
+                type(exc).__name__,
+                exc,
+            )
+            continue
+        outputs.append(job.output_path)
         logger.info(
             "Reconstructed %s -> %s acquisition=%d slice=%d image_shape=%s",
             result.source_path,
@@ -131,6 +156,11 @@ def reconstruct_t2_dataset(
             result.slice_index + 1,
             result.image_complex_shape,
         )
+    write_optional_csv(failure_path, failures)
+    if failures:
+        logger.warning("Skipped %d reconstruction file(s); details written to %s", len(failures), failure_path)
+    if not outputs:
+        raise RuntimeError(f"All reconstruction jobs failed; see {failure_path}.")
     return outputs
 
 
@@ -302,79 +332,154 @@ def make_npz_dataset(
     manifest_path = npz_root / "manifest.csv"
 
     rows: List[Dict[str, object]] = []
+    failures: List[Dict[str, object]] = []
+    failure_path = npz_root / "failed_npz.csv"
     grouped = labels.groupby(["folder", "fastmri_rawfile"], sort=True)
     logger.info("Creating NPZ samples for %d reconstructed T2 volumes", len(grouped))
 
     for (folder, rawfile), group in tqdm(grouped, desc="make NPZ"):
-        recon_path = resolve_reconstruction_path(recon_root, str(folder), str(rawfile))
-        with h5py.File(recon_path, "r") as h5:
-            if "image_complex" not in h5:
-                raise KeyError(f"{recon_path} does not contain image_complex.")
-            image_dataset = h5["image_complex"]
-            if image_dataset.ndim != 5:
-                raise ValueError(f"{recon_path} image_complex has unexpected shape {image_dataset.shape}")
+        try:
+            recon_path = resolve_reconstruction_path(recon_root, str(folder), str(rawfile))
+            prepared_rows = prepare_npz_rows_for_exam(
+                group,
+                recon_path,
+                samples_dir=samples_dir,
+                crop_size=crop_size,
+                max_coils=max_coils,
+            )
+        except SKIPPABLE_DATA_ERRORS as exc:
+            failures.append(
+                {
+                    "folder": str(folder),
+                    "fastmri_rawfile": str(rawfile),
+                    "recon_path": str(recon_root / str(folder) / f"{Path(str(rawfile)).stem}_complex_recon.h5"),
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                }
+            )
+            logger.warning(
+                "Skipping NPZ creation for %s/%s: %s: %s",
+                folder,
+                rawfile,
+                type(exc).__name__,
+                exc,
+            )
+            continue
 
-            for _, row in group.iterrows():
-                slice_one_based = int(row["slice"])
-                slice_index = slice_one_based - 1
-                all_coils_slice, acquisition_index = read_selected_reconstruction_slice(
-                    h5,
-                    recon_path,
-                    requested_slice_index=slice_index,
-                )
-                coil_energy = np.sum(np.abs(all_coils_slice) ** 2, axis=(-2, -1))
-                selected_coils = top_energy_coils(coil_energy, max_coils=max_coils)
-                selected = all_coils_slice[selected_coils]
-                selected = center_crop_last2(selected, crop_size)
-                selected = pad_coil_axis(selected.astype(np.complex64), max_coils)
-
-                patient_id = int(row["fastmri_pt_id"])
-                sample_name = f"pt{patient_id:03d}_slice{slice_one_based:03d}.npz"
-                sample_path = samples_dir / sample_name
-                if sample_path.exists() and not overwrite:
-                    pass
-                else:
-                    np.savez_compressed(
-                        sample_path,
-                        image_complex=selected,
-                        patient_id=np.int32(patient_id),
-                        slice=np.int32(slice_one_based),
-                        pirads=np.int32(row["PIRADS"]),
-                        label=np.int32(row["label"]),
-                        split=str(row["data_split"]),
-                        acquisition_index=np.int32(acquisition_index),
-                        selected_coils=selected_coils.astype(np.int32),
-                    )
-
-                rows.append(
-                    {
-                        "path": sample_path.relative_to(npz_root).as_posix(),
-                        "fastmri_pt_id": patient_id,
-                        "slice": slice_one_based,
-                        "slice_index": slice_index,
-                        "PIRADS": int(row["PIRADS"]),
-                        "label": int(row["label"]),
-                        "data_split": str(row["data_split"]),
-                        "folder": str(folder),
-                        "fastmri_rawfile": str(rawfile),
-                        "source_recon": str(recon_path),
-                        "acquisition_index": acquisition_index,
-                        "selected_coils": ";".join(str(int(coil)) for coil in selected_coils),
-                        "channels": int(selected.shape[0]),
-                        "height": int(selected.shape[-2]),
-                        "width": int(selected.shape[-1]),
-                    }
+        for prepared in prepared_rows:
+            sample_path = prepared["sample_path"]
+            if sample_path.exists() and not overwrite:
+                pass
+            else:
+                np.savez_compressed(
+                    sample_path,
+                    image_complex=prepared["image_complex"],
+                    patient_id=np.int32(prepared["fastmri_pt_id"]),
+                    slice=np.int32(prepared["slice"]),
+                    pirads=np.int32(prepared["PIRADS"]),
+                    label=np.int32(prepared["label"]),
+                    split=str(prepared["data_split"]),
+                    acquisition_index=np.int32(prepared["acquisition_index"]),
+                    selected_coils=prepared["selected_coils"].astype(np.int32),
                 )
 
+            rows.append(
+                {
+                    "path": sample_path.relative_to(npz_root).as_posix(),
+                    "fastmri_pt_id": int(prepared["fastmri_pt_id"]),
+                    "slice": int(prepared["slice"]),
+                    "slice_index": int(prepared["slice_index"]),
+                    "PIRADS": int(prepared["PIRADS"]),
+                    "label": int(prepared["label"]),
+                    "data_split": str(prepared["data_split"]),
+                    "folder": str(prepared["folder"]),
+                    "fastmri_rawfile": str(prepared["fastmri_rawfile"]),
+                    "source_recon": str(prepared["source_recon"]),
+                    "acquisition_index": int(prepared["acquisition_index"]),
+                    "selected_coils": ";".join(str(int(coil)) for coil in prepared["selected_coils"]),
+                    "channels": int(prepared["image_complex"].shape[0]),
+                    "height": int(prepared["image_complex"].shape[-2]),
+                    "width": int(prepared["image_complex"].shape[-1]),
+                }
+            )
+
+    write_optional_csv(failure_path, failures)
+    if failures:
+        logger.warning("Skipped %d NPZ exam(s); details written to %s", len(failures), failure_path)
     write_manifest(manifest_path, rows)
     logger.info("Wrote manifest with %d samples to %s", len(rows), manifest_path)
     return manifest_path
+
+
+def prepare_npz_rows_for_exam(
+    group,
+    recon_path: Path,
+    *,
+    samples_dir: Path,
+    crop_size: int,
+    max_coils: int,
+) -> List[Dict[str, object]]:
+    prepared_rows: List[Dict[str, object]] = []
+    with h5py.File(recon_path, "r") as h5:
+        if "image_complex" not in h5:
+            raise KeyError(f"{recon_path} does not contain image_complex.")
+        image_dataset = h5["image_complex"]
+        if image_dataset.ndim != 5:
+            raise ValueError(f"{recon_path} image_complex has unexpected shape {image_dataset.shape}")
+
+        for _, row in group.iterrows():
+            slice_one_based = int(row["slice"])
+            slice_index = slice_one_based - 1
+            all_coils_slice, acquisition_index = read_selected_reconstruction_slice(
+                h5,
+                recon_path,
+                requested_slice_index=slice_index,
+            )
+            coil_energy = np.sum(np.abs(all_coils_slice) ** 2, axis=(-2, -1))
+            selected_coils = top_energy_coils(coil_energy, max_coils=max_coils)
+            selected = all_coils_slice[selected_coils]
+            selected = center_crop_last2(selected, crop_size)
+            selected = pad_coil_axis(selected.astype(np.complex64), max_coils)
+
+            patient_id = int(row["fastmri_pt_id"])
+            sample_name = f"pt{patient_id:03d}_slice{slice_one_based:03d}.npz"
+            prepared_rows.append(
+                {
+                    "sample_path": samples_dir / sample_name,
+                    "image_complex": selected,
+                    "fastmri_pt_id": patient_id,
+                    "slice": slice_one_based,
+                    "slice_index": slice_index,
+                    "PIRADS": int(row["PIRADS"]),
+                    "label": int(row["label"]),
+                    "data_split": str(row["data_split"]),
+                    "folder": str(row["folder"]),
+                    "fastmri_rawfile": str(row["fastmri_rawfile"]),
+                    "source_recon": recon_path,
+                    "acquisition_index": acquisition_index,
+                    "selected_coils": selected_coils,
+                }
+            )
+    return prepared_rows
 
 
 def write_manifest(path: Path, rows: Iterable[Dict[str, object]]) -> None:
     rows = list(rows)
     if not rows:
         raise ValueError("No NPZ samples were written; manifest would be empty.")
+    fieldnames = list(rows[0].keys())
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def write_optional_csv(path: Path, rows: Iterable[Dict[str, object]]) -> None:
+    rows = list(rows)
+    if not rows:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = list(rows[0].keys())
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)

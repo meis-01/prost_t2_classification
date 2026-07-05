@@ -1,5 +1,7 @@
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import ModuleType
 
 import numpy as np
 import pandas as pd
@@ -199,3 +201,99 @@ def test_reconstruct_selected_t2_file_writes_single_acquisition_slice(tmp_path):
         assert h5.attrs["subset_reconstruction"] == np.True_
         assert h5.attrs["selected_acquisition_index"] == 1
         assert h5.attrs["selected_slice_index"] == 2
+
+
+def test_reconstruct_t2_dataset_skips_failed_files(tmp_path, monkeypatch):
+    fft_module = ModuleType("fastmri_tools.prostate_opts.fft")
+    grappa_module = ModuleType("fastmri_tools.prostate_opts.grappa")
+    fft_module.centered_ifft = lambda kspace, axes=(-2, -1): kspace
+    grappa_module.grappa_fill = lambda kspace, calibration, kernel_size=(5, 5): kspace
+    tqdm_module = ModuleType("tqdm")
+    tqdm_module.tqdm = lambda iterable, desc=None: iterable
+    monkeypatch.setitem(sys.modules, "h5py", ModuleType("h5py"))
+    monkeypatch.setitem(sys.modules, "tqdm", tqdm_module)
+    monkeypatch.setitem(sys.modules, "fastmri_tools", ModuleType("fastmri_tools"))
+    monkeypatch.setitem(sys.modules, "fastmri_tools.prostate_opts", ModuleType("fastmri_tools.prostate_opts"))
+    monkeypatch.setitem(sys.modules, "fastmri_tools.prostate_opts.fft", fft_module)
+    monkeypatch.setitem(sys.modules, "fastmri_tools.prostate_opts.grappa", grappa_module)
+    from prost_t2_classification import preprocess
+    from prost_t2_classification.preprocess import ReconstructionResult
+
+    raw_root = tmp_path / "raw"
+    recon_root = tmp_path / "recon"
+    folder = raw_root / "fastMRI_prostate_T2_IDS_001_020"
+    folder.mkdir(parents=True)
+    bad_input = folder / "file_prostate_AXT2_001.h5"
+    good_input = folder / "file_prostate_AXT2_002.h5"
+    bad_input.touch()
+    good_input.touch()
+
+    def fake_reconstruct(input_path, output_path, **kwargs):
+        if input_path == bad_input:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"partial")
+            raise RuntimeError("corrupt hdf5")
+        output_path.write_bytes(b"ok")
+        return ReconstructionResult(
+            source_path=input_path,
+            output_path=output_path,
+            original_shape=(3, 4, 2, 4, 4),
+            image_complex_shape=(1, 1, 2, 4, 4),
+            acquisition_index=1,
+            slice_index=2,
+        )
+
+    monkeypatch.setattr(preprocess, "reconstruct_selected_t2_file", fake_reconstruct)
+
+    outputs = preprocess.reconstruct_t2_dataset(raw_root, recon_root)
+
+    bad_output = recon_root / "fastMRI_prostate_T2_IDS_001_020" / "file_prostate_AXT2_001_complex_recon.h5"
+    good_output = recon_root / "fastMRI_prostate_T2_IDS_001_020" / "file_prostate_AXT2_002_complex_recon.h5"
+    assert outputs == [good_output]
+    assert not bad_output.exists()
+    assert good_output.exists()
+    failures = pd.read_csv(recon_root / "failed_reconstructions.csv")
+    assert failures["input_path"].tolist() == [str(bad_input)]
+    assert failures["error_type"].tolist() == ["RuntimeError"]
+
+
+def test_make_npz_dataset_skips_missing_reconstructions(tmp_path):
+    h5py = pytest.importorskip("h5py")
+    from prost_t2_classification.preprocess import make_npz_dataset
+
+    labels_path = tmp_path / "t2_slice_level_labels.csv"
+    folder = "training"
+    rows = []
+    for patient_id, rawfile in (
+        (1, "file_prostate_AXT2_001.h5"),
+        (2, "file_prostate_AXT2_002.h5"),
+    ):
+        for slice_one_based in (1, 2):
+            rows.append(
+                {
+                    "fastmri_pt_id": patient_id,
+                    "slice": slice_one_based,
+                    "PIRADS": 3,
+                    "fastmri_rawfile": rawfile,
+                    "data_split": "training",
+                    "folder": folder,
+                }
+            )
+    pd.DataFrame(rows).to_csv(labels_path, index=False)
+
+    recon_root = tmp_path / "recon"
+    recon_path = recon_root / folder / "file_prostate_AXT2_001_complex_recon.h5"
+    recon_path.parent.mkdir(parents=True)
+    with h5py.File(recon_path, "w") as h5:
+        h5.create_dataset("image_complex", data=np.ones((1, 1, 2, 4, 4), dtype=np.complex64))
+        h5.attrs["selected_acquisition_index"] = 1
+        h5.attrs["selected_slice_index"] = 1
+
+    npz_root = tmp_path / "npz"
+    manifest_path = make_npz_dataset(labels_path, recon_root, npz_root, crop_size=4, max_coils=1)
+
+    manifest = pd.read_csv(manifest_path)
+    assert manifest["fastmri_rawfile"].tolist() == ["file_prostate_AXT2_001.h5"]
+    failures = pd.read_csv(npz_root / "failed_npz.csv")
+    assert failures["fastmri_rawfile"].tolist() == ["file_prostate_AXT2_002.h5"]
+    assert failures["error_type"].tolist() == ["FileNotFoundError"]
