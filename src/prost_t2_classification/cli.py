@@ -151,12 +151,7 @@ def add_train_args(
         "--complex-activation",
         choices=COMPLEX_ACTIVATIONS,
         default=None,
-        help="Single complex activation to use; defaults to modrelu outside --light.",
-    )
-    parser.add_argument(
-        "--complex-activations",
-        default=None,
-        help="Comma-separated complex activations, or 'all'. Defaults to all activations in --light.",
+        help="Complex activation to use; defaults to modrelu.",
     )
 
 
@@ -497,26 +492,9 @@ def train_from_args(manifest: Path, args, *, light_mode: bool = False) -> None:
 
 
 def complex_activations_from_args(args, *, light_mode: bool = False) -> tuple[ComplexActivation, ...]:
-    value = getattr(args, "complex_activations", None)
-    if value is not None:
-        value = value.strip().lower()
-        if value == "all":
-            return COMPLEX_ACTIVATIONS
-        activations = tuple(item.strip().lower() for item in value.split(",") if item.strip())
-        if not activations:
-            raise ValueError("--complex-activations must name at least one activation.")
-        invalid = sorted(set(activations).difference(COMPLEX_ACTIVATIONS))
-        if invalid:
-            raise ValueError(
-                f"Unknown complex activation(s) {invalid}; expected one of {', '.join(COMPLEX_ACTIVATIONS)}."
-            )
-        return activations  # type: ignore[return-value]
-
     activation = getattr(args, "complex_activation", None)
     if activation is not None:
         return (activation,)
-    if light_mode:
-        return COMPLEX_ACTIVATIONS
     return ("modrelu",)
 
 

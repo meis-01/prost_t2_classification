@@ -172,7 +172,7 @@ def test_reconstruct_accepts_labels_and_light_counts():
     assert args.light is True
 
 
-def test_light_training_defaults_to_all_complex_activations():
+def test_light_training_defaults_to_modrelu_only():
     args = build_parser().parse_args(
         [
             "run",
@@ -189,10 +189,10 @@ def test_light_training_defaults_to_all_complex_activations():
         ]
     )
 
-    assert complex_activations_from_args(args, light_mode=True) == ("modrelu", "crelu", "cardioid")
+    assert complex_activations_from_args(args, light_mode=True) == ("modrelu",)
 
 
-def test_regular_training_defaults_to_one_complex_activation_and_accepts_all():
+def test_regular_training_defaults_to_modrelu_only():
     parser = build_parser()
     regular = parser.parse_args(
         [
@@ -203,20 +203,8 @@ def test_regular_training_defaults_to_one_complex_activation_and_accepts_all():
             "D:/fastmri_prostate/runs",
         ]
     )
-    all_activations = parser.parse_args(
-        [
-            "train",
-            "--manifest",
-            "D:/fastmri_prostate/npz_t2_coils/manifest.csv",
-            "--runs-dir",
-            "D:/fastmri_prostate/runs",
-            "--complex-activations",
-            "all",
-        ]
-    )
 
     assert complex_activations_from_args(regular) == ("modrelu",)
-    assert complex_activations_from_args(all_activations) == ("modrelu", "crelu", "cardioid")
 
 
 def test_reconstruct_selected_t2_file_writes_single_acquisition_slice(tmp_path):

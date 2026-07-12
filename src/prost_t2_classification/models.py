@@ -7,8 +7,8 @@ from torch import nn
 from torch.nn import functional as F
 
 
-ComplexActivation = Literal["modrelu", "crelu", "cardioid"]
-COMPLEX_ACTIVATIONS: tuple[ComplexActivation, ...] = ("modrelu", "crelu", "cardioid")
+ComplexActivation = Literal["modrelu"]
+COMPLEX_ACTIVATIONS: tuple[ComplexActivation, ...] = ("modrelu",)
 COMPLEX_CHANNELS: tuple[int, int, int, int] = (32, 64, 128, 192)
 PARAMETER_MATCHED_REAL_CHANNELS: tuple[int, int, int, int] = (64, 128, 256, 384)
 
@@ -102,29 +102,9 @@ class ModReLU(nn.Module):
         return x * scale
 
 
-class ComplexReLU(nn.Module):
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.complex(F.relu(x.real), F.relu(x.imag))
-
-
-class ComplexCardioid(nn.Module):
-    def __init__(self, eps: float = 1e-6) -> None:
-        super().__init__()
-        self.eps = eps
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        magnitude = torch.abs(x)
-        scale = 0.5 * (1.0 + x.real / (magnitude + self.eps))
-        return x * scale
-
-
 def build_complex_activation(name: ComplexActivation, channels: int) -> nn.Module:
     if name == "modrelu":
         return ModReLU(channels)
-    if name == "crelu":
-        return ComplexReLU()
-    if name == "cardioid":
-        return ComplexCardioid()
     raise ValueError(f"Unknown complex activation: {name}")
 
 

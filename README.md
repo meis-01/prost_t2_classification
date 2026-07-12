@@ -79,11 +79,7 @@ only matching T2 H5 entries when the provided download script has one T2 curl
 command per exam. If the script only exposes archive-level T2 tarballs, the
 command exits before downloading the full T2 archives.
 
-When training is enabled, `--light` runs the real model once and the complex
-model with `modrelu`, `crelu`, and `cardioid` activations. Use
-`--complex-activation` for a single complex activation, or
-`--complex-activations all` to request the same activation sweep outside light
-mode.
+When training is enabled, the complex model uses `modrelu`.
 
 If the raw T2 files and labels are already downloaded and expanded, skip the
 download stage:
@@ -177,10 +173,10 @@ Train both models:
 prost-t2 train --manifest D:\fastmri_prostate\npz_t2_middle_coil\manifest.csv --runs-dir D:\fastmri_prostate\runs --mode both
 ```
 
-Run the complex activation sweep on an existing manifest:
+Train the complex model only:
 
 ```powershell
-prost-t2 train --manifest D:\fastmri_prostate\npz_t2_middle_coil\manifest.csv --runs-dir D:\fastmri_prostate\runs --mode complex --complex-activations all
+prost-t2 train --manifest D:\fastmri_prostate\npz_t2_middle_coil\manifest.csv --runs-dir D:\fastmri_prostate\runs --mode complex --complex-activation modrelu
 ```
 
 ## Data Decisions
