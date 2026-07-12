@@ -10,7 +10,7 @@ from torch.nn import functional as F
 ComplexActivation = Literal["modrelu", "crelu", "cardioid"]
 COMPLEX_ACTIVATIONS: tuple[ComplexActivation, ...] = ("modrelu", "crelu", "cardioid")
 COMPLEX_CHANNELS: tuple[int, int, int, int] = (32, 64, 128, 192)
-PARAMETER_MATCHED_REAL_CHANNELS: tuple[int, int, int, int] = (43, 91, 172, 281)
+PARAMETER_MATCHED_REAL_CHANNELS: tuple[int, int, int, int] = (64, 128, 256, 384)
 
 
 class RealAmplitudeCNN(nn.Module):

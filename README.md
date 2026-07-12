@@ -10,9 +10,9 @@ The experiment compares:
 - a real-valued CNN that receives only coil image amplitudes;
 - a complex-valued CNN that receives the same selected coil as a complex image.
 
-The real CNN is widened to match the parameter count of the complex backbone:
-its channel widths are `43, 91, 172, 281`, compared with complex widths
-`32, 64, 128, 192`.
+The real CNN uses doubled channel widths to match the two-component complex
+comparison: its channel widths are `64, 128, 256, 384`, compared with complex
+widths `32, 64, 128, 192`.
 
 PI-RADS labels are binarized as in the paper: `PI-RADS > 2` is clinically
 significant prostate cancer.

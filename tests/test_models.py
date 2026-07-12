@@ -1,6 +1,12 @@
 import torch
+import pytest
 
-from prost_t2_classification.models import COMPLEX_ACTIVATIONS, build_model
+from prost_t2_classification.models import (
+    COMPLEX_ACTIVATIONS,
+    COMPLEX_CHANNELS,
+    PARAMETER_MATCHED_REAL_CHANNELS,
+    build_model,
+)
 
 
 def _trainable_params(model):
@@ -19,12 +25,14 @@ def test_complex_model_builds_with_each_activation():
         assert output.shape == (2,)
 
 
-def test_real_model_is_parameter_matched_to_complex_backbone():
-    real_params = _trainable_params(build_model("real", in_channels=5))
-    crelu_params = _trainable_params(build_model("complex", in_channels=5, complex_activation="crelu"))
-    cardioid_params = _trainable_params(build_model("complex", in_channels=5, complex_activation="cardioid"))
-    modrelu_params = _trainable_params(build_model("complex", in_channels=5, complex_activation="modrelu"))
+def test_real_model_uses_double_widths_for_complex_component_parity():
+    assert PARAMETER_MATCHED_REAL_CHANNELS == tuple(channel * 2 for channel in COMPLEX_CHANNELS)
 
-    assert real_params == crelu_params
-    assert real_params == cardioid_params
-    assert modrelu_params - real_params == 832
+    real_params = _trainable_params(build_model("real", in_channels=1))
+    crelu_params = _trainable_params(build_model("complex", in_channels=1, complex_activation="crelu"))
+    cardioid_params = _trainable_params(build_model("complex", in_channels=1, complex_activation="cardioid"))
+    modrelu_params = _trainable_params(build_model("complex", in_channels=1, complex_activation="modrelu"))
+
+    assert real_params / crelu_params == pytest.approx(2.0, rel=0.005)
+    assert real_params / cardioid_params == pytest.approx(2.0, rel=0.005)
+    assert real_params / modrelu_params == pytest.approx(2.0, rel=0.005)
