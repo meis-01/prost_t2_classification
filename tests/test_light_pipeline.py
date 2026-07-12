@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from prost_t2_classification.cli import build_parser
+from prost_t2_classification.cli import build_parser, complex_activations_from_args
 from prost_t2_classification.download import (
     DownloadEntry,
     presigned_url_expiration,
@@ -172,6 +172,53 @@ def test_reconstruct_accepts_labels_and_light_counts():
     assert args.light is True
 
 
+def test_light_training_defaults_to_all_complex_activations():
+    args = build_parser().parse_args(
+        [
+            "run",
+            "--light",
+            "--skip-download",
+            "--skip-reconstruct",
+            "--skip-npz",
+            "--extract-dir",
+            "D:/fastmri_prostate/T2",
+            "--npz-dir",
+            "D:/fastmri_prostate_light/npz_t2_coils",
+            "--runs-dir",
+            "D:/fastmri_prostate_light/runs",
+        ]
+    )
+
+    assert complex_activations_from_args(args, light_mode=True) == ("modrelu", "crelu", "cardioid")
+
+
+def test_regular_training_defaults_to_one_complex_activation_and_accepts_all():
+    parser = build_parser()
+    regular = parser.parse_args(
+        [
+            "train",
+            "--manifest",
+            "D:/fastmri_prostate/npz_t2_coils/manifest.csv",
+            "--runs-dir",
+            "D:/fastmri_prostate/runs",
+        ]
+    )
+    all_activations = parser.parse_args(
+        [
+            "train",
+            "--manifest",
+            "D:/fastmri_prostate/npz_t2_coils/manifest.csv",
+            "--runs-dir",
+            "D:/fastmri_prostate/runs",
+            "--complex-activations",
+            "all",
+        ]
+    )
+
+    assert complex_activations_from_args(regular) == ("modrelu",)
+    assert complex_activations_from_args(all_activations) == ("modrelu", "crelu", "cardioid")
+
+
 def test_reconstruct_selected_t2_file_writes_single_acquisition_slice(tmp_path):
     h5py = pytest.importorskip("h5py")
     pytest.importorskip("fastmri_tools")
@@ -292,8 +339,12 @@ def test_make_npz_dataset_skips_missing_reconstructions(tmp_path):
     recon_root = tmp_path / "recon"
     recon_path = recon_root / folder / "file_prostate_AXT2_001_complex_recon.h5"
     recon_path.parent.mkdir(parents=True)
+    image_complex = np.zeros((1, 2, 3, 4, 4), dtype=np.complex64)
+    image_complex[:, :, 0] = 1 + 0j
+    image_complex[:, :, 1] = 7 + 3j
+    image_complex[:, :, 2] = 12 + 0j
     with h5py.File(recon_path, "w") as h5:
-        h5.create_dataset("image_complex", data=np.ones((1, 2, 2, 4, 4), dtype=np.complex64))
+        h5.create_dataset("image_complex", data=image_complex)
         h5.attrs["selected_acquisition_index"] = 1
         h5.attrs["selected_slice_indices"] = np.array([0, 1], dtype=np.int32)
 
@@ -306,6 +357,10 @@ def test_make_npz_dataset_skips_missing_reconstructions(tmp_path):
         "file_prostate_AXT2_001.h5",
     ]
     assert manifest["slice"].tolist() == [1, 2]
+    assert manifest["selected_coils"].astype(str).tolist() == ["1", "1"]
+    with np.load(npz_root / manifest.iloc[0]["path"]) as npz:
+        assert npz["image_complex"].shape == (1, 4, 4)
+        assert np.all(npz["image_complex"] == np.complex64(7 + 3j))
     failures = pd.read_csv(npz_root / "failed_npz.csv")
     assert failures["fastmri_rawfile"].tolist() == ["file_prostate_AXT2_002.h5"]
     assert failures["error_type"].tolist() == ["FileNotFoundError"]

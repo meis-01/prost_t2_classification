@@ -9,6 +9,12 @@ def middle_acquisition_index(num_acquisitions: int) -> int:
     return num_acquisitions // 2
 
 
+def middle_coil_index(num_coils: int) -> int:
+    if num_coils <= 0:
+        raise ValueError("num_coils must be positive.")
+    return num_coils // 2
+
+
 def top_energy_coils(energy: np.ndarray, *, max_coils: int = 5) -> np.ndarray:
     if energy.ndim != 1:
         raise ValueError("energy must be a 1D array.")

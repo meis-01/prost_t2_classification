@@ -12,8 +12,8 @@ from tqdm import tqdm
 from .image_ops import (
     center_crop_last2,
     middle_acquisition_index,
+    middle_coil_index,
     pad_coil_axis,
-    top_energy_coils,
 )
 from .labels import (
     load_t2_labels,
@@ -350,13 +350,15 @@ def make_npz_dataset(
     npz_root: Path,
     *,
     crop_size: int = 224,
-    max_coils: int = 5,
+    max_coils: int = 1,
     overwrite: bool = False,
     limit_patients: Optional[int] = None,
     limit_slices: Optional[int] = None,
     split_exam_counts: Optional[Mapping[str, int]] = None,
 ) -> Path:
     logger = get_logger()
+    if max_coils <= 0:
+        raise ValueError("max_coils must be positive.")
     labels = load_t2_labels(labels_path)
     labels = select_preprocessing_labels(
         labels,
@@ -459,6 +461,8 @@ def prepare_npz_rows_for_exam(
     crop_size: int,
     max_coils: int,
 ) -> List[Dict[str, object]]:
+    if max_coils <= 0:
+        raise ValueError("max_coils must be positive.")
     prepared_rows: List[Dict[str, object]] = []
     with h5py.File(recon_path, "r") as h5:
         if "image_complex" not in h5:
@@ -475,8 +479,7 @@ def prepare_npz_rows_for_exam(
                 recon_path,
                 requested_slice_index=slice_index,
             )
-            coil_energy = np.sum(np.abs(all_coils_slice) ** 2, axis=(-2, -1))
-            selected_coils = top_energy_coils(coil_energy, max_coils=max_coils)
+            selected_coils = np.asarray([middle_coil_index(all_coils_slice.shape[0])], dtype=np.int64)
             selected = all_coils_slice[selected_coils]
             selected = center_crop_last2(selected, crop_size)
             selected = pad_coil_axis(selected.astype(np.complex64), max_coils)

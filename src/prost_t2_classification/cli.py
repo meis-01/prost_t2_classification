@@ -22,6 +22,7 @@ from .labels import (
     select_split_exams,
 )
 from .logging_utils import configure_logging
+from .models import COMPLEX_ACTIVATIONS, ComplexActivation
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -68,7 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     npz_parser.add_argument("--recon-dir", type=Path, required=True)
     npz_parser.add_argument("--npz-dir", type=Path, required=True)
     npz_parser.add_argument("--crop-size", type=int, default=224)
-    npz_parser.add_argument("--max-coils", type=int, default=5)
+    npz_parser.add_argument("--max-coils", type=int, default=1)
     npz_parser.add_argument("--overwrite", action="store_true")
     npz_parser.add_argument("--limit-patients", type=int, default=None)
     npz_parser.add_argument("--limit-slices", type=int, default=None)
@@ -84,7 +85,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--recon-dir", type=Path, required=True)
     prepare_parser.add_argument("--npz-dir", type=Path, required=True)
     prepare_parser.add_argument("--crop-size", type=int, default=224)
-    prepare_parser.add_argument("--max-coils", type=int, default=5)
+    prepare_parser.add_argument("--max-coils", type=int, default=1)
     prepare_parser.add_argument("--kernel-size", default="5,5")
     prepare_parser.add_argument("--overwrite", action="store_true")
     prepare_parser.add_argument("--skip-reconstruct", action="store_true")
@@ -113,7 +114,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--skip-train", action="store_true")
     run_parser.add_argument("--overwrite", action="store_true")
     run_parser.add_argument("--crop-size", type=int, default=224)
-    run_parser.add_argument("--max-coils", type=int, default=5)
+    run_parser.add_argument("--max-coils", type=int, default=1)
     run_parser.add_argument("--kernel-size", default="5,5")
     add_light_args(run_parser)
     add_train_args(run_parser, include_manifest=False, include_runs_dir=False)
@@ -140,6 +141,23 @@ def add_train_args(
     parser.add_argument("--seed", type=int, default=10383)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--device", default=None)
+    parser.add_argument(
+        "--in-channels",
+        type=int,
+        default=None,
+        help="Model input channels; defaults to the channel count recorded in the manifest.",
+    )
+    parser.add_argument(
+        "--complex-activation",
+        choices=COMPLEX_ACTIVATIONS,
+        default=None,
+        help="Single complex activation to use; defaults to modrelu outside --light.",
+    )
+    parser.add_argument(
+        "--complex-activations",
+        default=None,
+        help="Comma-separated complex activations, or 'all'. Defaults to all activations in --light.",
+    )
 
 
 def add_light_args(parser: argparse.ArgumentParser) -> None:
@@ -380,7 +398,7 @@ def cmd_run(args) -> int:
         else args.recon_dir
     )
     npz_dir = (
-        choose_path(args.npz_dir, "Selected-coil NPZ directory", base / "data" / "npz_t2_coils")
+        choose_path(args.npz_dir, "Selected-coil NPZ directory", base / "data" / "npz_t2_middle_coil")
         if needs_npz_dir
         else args.npz_dir
     )
@@ -441,13 +459,14 @@ def cmd_run(args) -> int:
         if manifest is None:
             raise ValueError("Training requires an NPZ manifest; provide --npz-dir or run make-npz first.")
         args.runs_dir = runs_dir
-        train_from_args(manifest, args)
+        train_from_args(manifest, args, light_mode=light_counts is not None)
     return 0
 
 
-def train_from_args(manifest: Path, args) -> None:
+def train_from_args(manifest: Path, args, *, light_mode: bool = False) -> None:
     from .train import TrainConfig, train_both_models, train_model
 
+    complex_activations = complex_activations_from_args(args, light_mode=light_mode)
     common = {
         "epochs": args.epochs,
         "batch_size": args.batch_size,
@@ -457,11 +476,48 @@ def train_from_args(manifest: Path, args) -> None:
         "seed": args.seed,
         "num_workers": args.num_workers,
         "device": args.device,
+        "in_channels": args.in_channels,
     }
     if args.mode == "both":
-        train_both_models(manifest, args.runs_dir, **common)
+        train_both_models(manifest, args.runs_dir, complex_activations=complex_activations, **common)
+        return
+    if args.mode == "complex":
+        for activation in complex_activations:
+            train_model(
+                TrainConfig(
+                    manifest=manifest,
+                    runs_dir=args.runs_dir,
+                    mode="complex",
+                    complex_activation=activation,
+                    **common,
+                )
+            )
         return
     train_model(TrainConfig(manifest=manifest, runs_dir=args.runs_dir, mode=args.mode, **common))
+
+
+def complex_activations_from_args(args, *, light_mode: bool = False) -> tuple[ComplexActivation, ...]:
+    value = getattr(args, "complex_activations", None)
+    if value is not None:
+        value = value.strip().lower()
+        if value == "all":
+            return COMPLEX_ACTIVATIONS
+        activations = tuple(item.strip().lower() for item in value.split(",") if item.strip())
+        if not activations:
+            raise ValueError("--complex-activations must name at least one activation.")
+        invalid = sorted(set(activations).difference(COMPLEX_ACTIVATIONS))
+        if invalid:
+            raise ValueError(
+                f"Unknown complex activation(s) {invalid}; expected one of {', '.join(COMPLEX_ACTIVATIONS)}."
+            )
+        return activations  # type: ignore[return-value]
+
+    activation = getattr(args, "complex_activation", None)
+    if activation is not None:
+        return (activation,)
+    if light_mode:
+        return COMPLEX_ACTIVATIONS
+    return ("modrelu",)
 
 
 def choose_path(value: Optional[Path], label: str, default: Path) -> Path:
