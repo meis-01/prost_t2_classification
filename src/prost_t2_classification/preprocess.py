@@ -42,6 +42,7 @@ class ReconstructionResult:
     image_complex_shape: Tuple[int, ...]
     acquisition_index: int
     slice_indices: Tuple[int, ...]
+    coil_indices: Tuple[int, ...]
 
 
 def iter_t2_h5_files(raw_root: Path) -> List[Path]:
@@ -195,6 +196,7 @@ def reconstruct_selected_t2_file(
 
         original_shape = tuple(kspace_dataset.shape)
         acquisition_index = middle_acquisition_index(original_shape[0])
+        coil_indices = (middle_coil_index(original_shape[2]),)
         slice_indices = selected_slice_indices(slice_numbers_one_based, original_shape[1], input_path)
         source_attrs = {key: _attr_value(value) for key, value in h5.attrs.items()}
 
@@ -208,6 +210,7 @@ def reconstruct_selected_t2_file(
                 original_shape=original_shape,
                 acquisition_index=acquisition_index,
                 slice_indices=slice_indices,
+                coil_indices=coil_indices,
             )
             image_dataset = None
             for output_slice_index, source_slice_index in enumerate(slice_indices):
@@ -222,6 +225,7 @@ def reconstruct_selected_t2_file(
                     grappa_fill(kspace, calibration, kernel_size=kernel_size),
                     axes=(-2, -1),
                 ).astype(np.complex64, copy=False)
+                image_complex = image_complex[:, :, coil_indices[0] : coil_indices[0] + 1]
 
                 if image_dataset is None:
                     image_complex_shape = (1, len(slice_indices), *image_complex.shape[2:])
@@ -242,6 +246,7 @@ def reconstruct_selected_t2_file(
         image_complex_shape=image_complex_shape,
         acquisition_index=acquisition_index,
         slice_indices=slice_indices,
+        coil_indices=coil_indices,
     )
 
 
@@ -274,6 +279,7 @@ def write_reconstruction_metadata(
     original_shape: Tuple[int, ...],
     acquisition_index: int,
     slice_indices: Tuple[int, ...],
+    coil_indices: Tuple[int, ...],
 ) -> None:
     h5.attrs["source_file"] = str(source_path)
     h5.attrs["sequence"] = "t2"
@@ -284,6 +290,8 @@ def write_reconstruction_metadata(
     h5.attrs["selected_acquisition_index"] = acquisition_index
     h5.attrs["selected_slice_indices"] = np.asarray(slice_indices, dtype=np.int32)
     h5.attrs["selected_slices"] = np.asarray([index + 1 for index in slice_indices], dtype=np.int32)
+    h5.attrs["selected_coil_indices"] = np.asarray(coil_indices, dtype=np.int32)
+    h5.attrs["selected_coils"] = np.asarray([index + 1 for index in coil_indices], dtype=np.int32)
 
     source_attrs_group = h5.create_group("source_attrs")
     for key, value in source_attrs.items():
@@ -342,6 +350,14 @@ def read_selected_reconstruction_slice(
         )
     acquisition_index = int(h5.attrs["selected_acquisition_index"])
     return np.asarray(image_dataset[0, output_slice_index]), acquisition_index
+
+
+def reconstruction_coil_indices(h5: h5py.File, num_coils: int) -> tuple[np.ndarray, bool]:
+    if "selected_coil_indices" in h5.attrs:
+        indices = np.asarray(h5.attrs["selected_coil_indices"], dtype=np.int64).reshape(-1)
+        if len(indices) == num_coils:
+            return indices, True
+    return np.arange(num_coils, dtype=np.int64), False
 
 
 def make_npz_dataset(
@@ -479,8 +495,14 @@ def prepare_npz_rows_for_exam(
                 recon_path,
                 requested_slice_index=slice_index,
             )
-            selected_coils = np.asarray([middle_coil_index(all_coils_slice.shape[0])], dtype=np.int64)
-            selected = all_coils_slice[selected_coils]
+            source_coils, already_selected = reconstruction_coil_indices(h5, all_coils_slice.shape[0])
+            if already_selected:
+                selected_coils = source_coils
+                selected = all_coils_slice
+            else:
+                local_coil_indices = np.asarray([middle_coil_index(all_coils_slice.shape[0])], dtype=np.int64)
+                selected_coils = source_coils[local_coil_indices]
+                selected = all_coils_slice[local_coil_indices]
             selected = center_crop_last2(selected, crop_size)
             selected = pad_coil_axis(selected.astype(np.complex64), max_coils)
 

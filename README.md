@@ -192,9 +192,8 @@ prost-t2 train --manifest D:\fastmri_prostate\npz_t2_middle_coil\manifest.csv --
   exam; `--light` keeps only the middle labeled slice.
 - The selected k-space slices are reconstructed through `fastmri-tools` GRAPPA
   and centered IFFT primitives, producing a compact complex `image_complex`
-  array with one acquisition and the selected slices.
-- The middle coil (`shape[0] // 2`) is selected from the reconstructed slice
-  being written as that NPZ sample.
+  array with one acquisition, the selected slices, and the middle coil
+  (`shape[2] // 2`).
 - Each NPZ stores `image_complex` with shape `(coils, height, width)` plus
   patient, slice, split, acquisition, and coil metadata.
 - After the best checkpoint is selected by validation AUC, the decision

@@ -248,14 +248,16 @@ def test_reconstruct_selected_t2_file_writes_single_acquisition_slice(tmp_path):
         slice_numbers_one_based=(3,),
     )
 
-    assert result.image_complex_shape == (1, 1, 2, 4, 4)
+    assert result.image_complex_shape == (1, 1, 1, 4, 4)
+    assert result.coil_indices == (1,)
     with h5py.File(output_path, "r") as h5:
-        assert h5["image_complex"].shape == (1, 1, 2, 4, 4)
+        assert h5["image_complex"].shape == (1, 1, 1, 4, 4)
         assert "kspace_regridded" not in h5
         assert "kspace_grappa" not in h5
         assert h5.attrs["subset_reconstruction"] == np.True_
         assert h5.attrs["selected_acquisition_index"] == 1
         assert h5.attrs["selected_slice_indices"].tolist() == [2]
+        assert h5.attrs["selected_coil_indices"].tolist() == [1]
 
 
 def test_reconstruct_t2_dataset_skips_failed_files(tmp_path, monkeypatch):
@@ -293,9 +295,10 @@ def test_reconstruct_t2_dataset_skips_failed_files(tmp_path, monkeypatch):
             source_path=input_path,
             output_path=output_path,
             original_shape=(3, 4, 2, 4, 4),
-            image_complex_shape=(1, 1, 2, 4, 4),
+            image_complex_shape=(1, 1, 1, 4, 4),
             acquisition_index=1,
             slice_indices=(2,),
+            coil_indices=(1,),
         )
 
     monkeypatch.setattr(preprocess, "reconstruct_selected_t2_file", fake_reconstruct)
