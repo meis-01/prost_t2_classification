@@ -76,6 +76,21 @@ def build_parser() -> argparse.ArgumentParser:
     add_light_args(npz_parser)
     npz_parser.set_defaults(func=cmd_make_npz)
 
+    kspace_npz_parser = subparsers.add_parser(
+        "make-kspace-npz",
+        help="Create selected-coil raw k-space NPZ files and manifest",
+    )
+    kspace_npz_parser.add_argument("--labels", type=Path, required=True, help="Label CSV or directory containing it")
+    kspace_npz_parser.add_argument("--raw-root", type=Path, required=True)
+    kspace_npz_parser.add_argument("--npz-dir", type=Path, required=True)
+    kspace_npz_parser.add_argument("--crop-size", type=int, default=224)
+    kspace_npz_parser.add_argument("--max-coils", type=int, default=1)
+    kspace_npz_parser.add_argument("--overwrite", action="store_true")
+    kspace_npz_parser.add_argument("--limit-patients", type=int, default=None)
+    kspace_npz_parser.add_argument("--limit-slices", type=int, default=None)
+    add_light_args(kspace_npz_parser)
+    kspace_npz_parser.set_defaults(func=cmd_make_kspace_npz)
+
     prepare_parser = subparsers.add_parser(
         "prepare-npz",
         help="Run T2 reconstruction if needed, then create selected-coil NPZ files",
@@ -132,7 +147,7 @@ def add_train_args(
         parser.add_argument("--manifest", type=Path, required=True)
     if include_runs_dir:
         parser.add_argument("--runs-dir", type=Path, required=include_manifest)
-    parser.add_argument("--mode", choices=("real", "complex", "both"), default="both")
+    parser.add_argument("--mode", choices=("real", "complex", "complex_kspace", "both"), default="both")
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
@@ -315,6 +330,24 @@ def cmd_make_npz(args) -> int:
     make_npz_dataset(
         args.labels,
         args.recon_dir,
+        args.npz_dir,
+        crop_size=args.crop_size,
+        max_coils=args.max_coils,
+        overwrite=args.overwrite,
+        limit_patients=args.limit_patients,
+        limit_slices=args.limit_slices,
+        split_exam_counts=light_counts,
+    )
+    return 0
+
+
+def cmd_make_kspace_npz(args) -> int:
+    from .preprocess import make_kspace_npz_dataset
+
+    light_counts = light_split_counts_from_args(args)
+    make_kspace_npz_dataset(
+        args.labels,
+        args.raw_root,
         args.npz_dir,
         crop_size=args.crop_size,
         max_coils=args.max_coils,

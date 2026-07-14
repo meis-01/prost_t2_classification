@@ -355,3 +355,56 @@ def test_make_npz_dataset_skips_missing_reconstructions(tmp_path):
     failures = pd.read_csv(npz_root / "failed_npz.csv")
     assert failures["fastmri_rawfile"].tolist() == ["file_prostate_AXT2_002.h5"]
     assert failures["error_type"].tolist() == ["FileNotFoundError"]
+
+
+def test_make_kspace_npz_dataset_writes_middle_acquisition_middle_coil(tmp_path):
+    h5py = pytest.importorskip("h5py")
+    from prost_t2_classification.preprocess import make_kspace_npz_dataset
+
+    labels_path = tmp_path / "t2_slice_level_labels.csv"
+    folder = "fastMRI_prostate_T2_IDS_001_020"
+    pd.DataFrame(
+        [
+            {
+                "fastmri_pt_id": 1,
+                "slice": 1,
+                "PIRADS": 3,
+                "fastmri_rawfile": "file_prostate_AXT2_001.h5",
+                "data_split": "training",
+                "folder": folder,
+            },
+            {
+                "fastmri_pt_id": 1,
+                "slice": 2,
+                "PIRADS": 4,
+                "fastmri_rawfile": "file_prostate_AXT2_001.h5",
+                "data_split": "training",
+                "folder": folder,
+            },
+        ]
+    ).to_csv(labels_path, index=False)
+
+    raw_root = tmp_path / "raw"
+    raw_path = raw_root / folder / "file_prostate_AXT2_001.h5"
+    raw_path.parent.mkdir(parents=True)
+    kspace = np.zeros((3, 2, 3, 4, 4), dtype=np.complex64)
+    kspace[1, 0, 1] = 7 + 2j
+    kspace[1, 1, 1] = 11 + 5j
+    with h5py.File(raw_path, "w") as h5:
+        h5.create_dataset("kspace", data=kspace)
+
+    npz_root = tmp_path / "npz_kspace"
+    manifest_path = make_kspace_npz_dataset(labels_path, raw_root, npz_root, crop_size=4, max_coils=1)
+
+    manifest = pd.read_csv(manifest_path)
+    assert manifest["fastmri_rawfile"].tolist() == [
+        "file_prostate_AXT2_001.h5",
+        "file_prostate_AXT2_001.h5",
+    ]
+    assert manifest["acquisition_index"].tolist() == [1, 1]
+    assert manifest["selected_coils"].astype(str).tolist() == ["1", "1"]
+    with np.load(npz_root / manifest.iloc[0]["path"]) as npz:
+        assert npz["kspace_complex"].shape == (1, 4, 4)
+        assert np.all(npz["kspace_complex"] == np.complex64(7 + 2j))
+    with np.load(npz_root / manifest.iloc[1]["path"]) as npz:
+        assert np.all(npz["kspace_complex"] == np.complex64(11 + 5j))

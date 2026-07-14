@@ -23,7 +23,7 @@ from .models import (
 )
 
 
-Mode = Literal["real", "complex"]
+Mode = Literal["real", "complex", "complex_kspace"]
 
 
 @dataclass(frozen=True)
@@ -216,6 +216,8 @@ def train_model(config: TrainConfig) -> Path:
 def run_label_from_config(config: TrainConfig) -> str:
     if config.mode == "complex":
         return f"complex_{config.complex_activation}"
+    if config.mode == "complex_kspace":
+        return f"complex_kspace_{config.complex_activation}"
     return config.mode
 
 
@@ -242,10 +244,11 @@ def infer_manifest_channels(manifest_path: Path) -> int:
 
     sample_path = manifest_path.parent / str(manifest.iloc[0]["path"])
     with np.load(sample_path) as npz:
-        image_complex = npz["image_complex"]
-        if image_complex.ndim != 3 or image_complex.shape[0] <= 0:
-            raise ValueError(f"{sample_path} image_complex must have shape (channels, height, width).")
-        return int(image_complex.shape[0])
+        key = "image_complex" if "image_complex" in npz else "kspace_complex"
+        complex_data = npz[key]
+        if complex_data.ndim != 3 or complex_data.shape[0] <= 0:
+            raise ValueError(f"{sample_path} {key} must have shape (channels, height, width).")
+        return int(complex_data.shape[0])
 
 
 def run_epoch(
