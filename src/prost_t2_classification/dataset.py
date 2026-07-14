@@ -13,7 +13,7 @@ from .image_ops import scale_complex_by_magnitude, standardize_real
 from .labels import assert_patient_split_disjoint
 
 
-Mode = Literal["real", "complex", "complex_kspace"]
+Mode = Literal["real", "complex"]
 
 
 class T2CoilNPZDataset(Dataset):
@@ -43,26 +43,19 @@ class T2CoilNPZDataset(Dataset):
     def __getitem__(self, index: int):
         row = self.rows.iloc[index]
         sample_path = self.root / row["path"]
+        with np.load(sample_path) as npz:
+            image_complex = npz["image_complex"].astype(np.complex64)
+
         if self.mode == "real":
-            with np.load(sample_path) as npz:
-                image_complex = npz["image_complex"].astype(np.complex64)
             image = np.abs(image_complex).astype(np.float32)
             if self.normalize:
                 image = standardize_real(image)
             tensor = torch.from_numpy(image)
         elif self.mode == "complex":
-            with np.load(sample_path) as npz:
-                image_complex = npz["image_complex"].astype(np.complex64)
             image_complex = image_complex.astype(np.complex64)
             if self.normalize:
                 image_complex = scale_complex_by_magnitude(image_complex)
             tensor = torch.from_numpy(image_complex)
-        elif self.mode == "complex_kspace":
-            with np.load(sample_path) as npz:
-                kspace_complex = npz["kspace_complex"].astype(np.complex64)
-            if self.normalize:
-                kspace_complex = scale_complex_by_magnitude(kspace_complex)
-            tensor = torch.from_numpy(kspace_complex)
         else:
             raise ValueError(f"Unknown mode: {self.mode}")
 

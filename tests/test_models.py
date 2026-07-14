@@ -25,13 +25,6 @@ def test_complex_model_builds_with_each_activation():
         assert output.shape == (2,)
 
 
-def test_complex_kspace_uses_same_parameters_as_complex_image_model():
-    image_params = _trainable_params(build_model("complex", in_channels=1, complex_activation="modrelu"))
-    kspace_params = _trainable_params(build_model("complex_kspace", in_channels=1, complex_activation="modrelu"))
-
-    assert kspace_params == image_params
-
-
 def test_real_model_uses_double_widths_for_complex_component_parity():
     assert PARAMETER_MATCHED_REAL_CHANNELS == tuple(channel * 2 for channel in COMPLEX_CHANNELS)
 

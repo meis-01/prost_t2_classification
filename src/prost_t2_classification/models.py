@@ -166,7 +166,7 @@ class ComplexT2CNN(nn.Module):
 
 
 def build_model(
-    mode: Literal["real", "complex", "complex_kspace"],
+    mode: Literal["real", "complex"],
     *,
     in_channels: int = 5,
     dropout: float = 0.2,
@@ -175,6 +175,6 @@ def build_model(
 ) -> nn.Module:
     if mode == "real":
         return RealAmplitudeCNN(in_channels=in_channels, dropout=dropout, channels=real_channels)
-    if mode in ("complex", "complex_kspace"):
+    if mode == "complex":
         return ComplexT2CNN(in_channels=in_channels, dropout=dropout, activation=complex_activation)
     raise ValueError(f"Unknown model mode: {mode}")
