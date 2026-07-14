@@ -69,7 +69,7 @@ def standardize_real(image: np.ndarray, eps: float = 1e-6) -> np.ndarray:
     return ((image - mean) / (std + eps)).astype(np.float32)
 
 
-def scale_complex_by_magnitude(image: np.ndarray, eps: float = 1e-6) -> np.ndarray:
+def scale_complex_by_magnitude(image: np.ndarray, eps: float = 1e-6, percentile: float = 99.0) -> np.ndarray:
     magnitude = np.abs(image)
-    scale = np.std(magnitude, axis=(-2, -1), keepdims=True)
+    scale = np.percentile(magnitude, percentile, axis=(-2, -1), keepdims=True)
     return (image / (scale + eps)).astype(np.complex64)

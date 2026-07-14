@@ -5,6 +5,7 @@ from prost_t2_classification.image_ops import (
     middle_acquisition_index,
     middle_coil_index,
     pad_coil_axis,
+    scale_complex_by_magnitude,
     top_energy_coils,
 )
 
@@ -30,3 +31,14 @@ def test_center_crop_last2_and_pad_coils():
     assert cropped.shape == (2, 4, 4)
     padded = pad_coil_axis(cropped, 5)
     assert padded.shape == (5, 4, 4)
+
+
+def test_scale_complex_by_magnitude_uses_robust_percentile():
+    image = np.ones((1, 2, 2), dtype=np.complex64)
+    image[0, 0, 0] = 100 + 0j
+
+    scaled = scale_complex_by_magnitude(image, percentile=50)
+
+    assert scaled.dtype == np.complex64
+    assert np.isclose(np.abs(scaled[0, 0, 1]), 1.0)
+    assert np.isclose(np.abs(scaled[0, 0, 0]), 100.0)

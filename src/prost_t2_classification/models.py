@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Literal
 
 import torch
@@ -70,6 +71,9 @@ class ComplexConv2d(nn.Module):
             padding=padding,
             bias=False,
         )
+        with torch.no_grad():
+            self.real_weight.weight.mul_(1 / math.sqrt(2))
+            self.imag_weight.weight.mul_(1 / math.sqrt(2))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if not torch.is_complex(x):
@@ -92,7 +96,7 @@ class ComplexBatchNorm2d(nn.Module):
 class ModReLU(nn.Module):
     def __init__(self, channels: int, eps: float = 1e-6) -> None:
         super().__init__()
-        self.bias = nn.Parameter(torch.full((channels,), -0.1))
+        self.bias = nn.Parameter(torch.zeros(channels))
         self.eps = eps
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
