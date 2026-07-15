@@ -9,7 +9,9 @@ from torch.nn import functional as F
 
 
 ComplexActivation = Literal["modrelu"]
+ComplexVariant = Literal["standard", "widely_linear_phase"]
 COMPLEX_ACTIVATIONS: tuple[ComplexActivation, ...] = ("modrelu",)
+COMPLEX_VARIANTS: tuple[ComplexVariant, ...] = ("standard", "widely_linear_phase")
 COMPLEX_CHANNELS: tuple[int, int, int, int] = (32, 64, 128, 192)
 PARAMETER_MATCHED_REAL_CHANNELS: tuple[int, int, int, int] = (64, 128, 256, 384)
 
@@ -83,6 +85,49 @@ class ComplexConv2d(nn.Module):
         return torch.complex(real, imag)
 
 
+class WidelyLinearComplexConv2d(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int, *, kernel_size: int = 3, padding: int = 1) -> None:
+        super().__init__()
+        self.direct_real = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=False)
+        self.direct_imag = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=False)
+        self.conj_real = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=False)
+        self.conj_imag = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=False)
+        with torch.no_grad():
+            for conv in (self.direct_real, self.direct_imag, self.conj_real, self.conj_imag):
+                conv.weight.mul_(0.5)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not torch.is_complex(x):
+            x = torch.complex(x, torch.zeros_like(x))
+        real = (
+            self.direct_real(x.real)
+            - self.direct_imag(x.imag)
+            + self.conj_real(x.real)
+            + self.conj_imag(x.imag)
+        )
+        imag = (
+            self.direct_imag(x.real)
+            + self.direct_real(x.imag)
+            + self.conj_imag(x.real)
+            - self.conj_real(x.imag)
+        )
+        return torch.complex(real, imag)
+
+
+class InputPhaseGate(nn.Module):
+    def __init__(self, channels: int) -> None:
+        super().__init__()
+        self.phase_scale = nn.Parameter(torch.zeros(channels))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not torch.is_complex(x):
+            x = torch.complex(x, torch.zeros_like(x))
+        magnitude = torch.abs(x)
+        phase = torch.atan2(x.imag, x.real)
+        gated_phase = self.phase_scale.view(1, -1, 1, 1) * phase
+        return torch.polar(magnitude, gated_phase)
+
+
 class ComplexBatchNorm2d(nn.Module):
     def __init__(self, channels: int) -> None:
         super().__init__()
@@ -125,12 +170,19 @@ class ComplexAvgPool2d(nn.Module):
 
 
 class ComplexBlock(nn.Module):
-    def __init__(self, in_channels: int, out_channels: int, *, activation: ComplexActivation) -> None:
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        *,
+        activation: ComplexActivation,
+        conv_layer: type[nn.Module] = ComplexConv2d,
+    ) -> None:
         super().__init__()
-        self.conv1 = ComplexConv2d(in_channels, out_channels)
+        self.conv1 = conv_layer(in_channels, out_channels)
         self.norm1 = ComplexBatchNorm2d(out_channels)
         self.act1 = build_complex_activation(activation, out_channels)
-        self.conv2 = ComplexConv2d(out_channels, out_channels)
+        self.conv2 = conv_layer(out_channels, out_channels)
         self.norm2 = ComplexBatchNorm2d(out_channels)
         self.act2 = build_complex_activation(activation, out_channels)
 
@@ -146,20 +198,26 @@ class ComplexT2CNN(nn.Module):
         in_channels: int = 5,
         dropout: float = 0.2,
         activation: ComplexActivation = "modrelu",
+        variant: ComplexVariant = "standard",
     ) -> None:
         super().__init__()
+        if variant not in COMPLEX_VARIANTS:
+            raise ValueError(f"Unknown complex variant: {variant}")
         c1, c2, c3, c4 = COMPLEX_CHANNELS
-        self.block1 = ComplexBlock(in_channels, c1, activation=activation)
+        conv_layer = WidelyLinearComplexConv2d if variant == "widely_linear_phase" else ComplexConv2d
+        self.input_gate = InputPhaseGate(in_channels) if variant == "widely_linear_phase" else nn.Identity()
+        self.block1 = ComplexBlock(in_channels, c1, activation=activation, conv_layer=conv_layer)
         self.pool1 = ComplexAvgPool2d(2)
-        self.block2 = ComplexBlock(c1, c2, activation=activation)
+        self.block2 = ComplexBlock(c1, c2, activation=activation, conv_layer=conv_layer)
         self.pool2 = ComplexAvgPool2d(2)
-        self.block3 = ComplexBlock(c2, c3, activation=activation)
+        self.block3 = ComplexBlock(c2, c3, activation=activation, conv_layer=conv_layer)
         self.pool3 = ComplexAvgPool2d(2)
-        self.block4 = ComplexBlock(c3, c4, activation=activation)
+        self.block4 = ComplexBlock(c3, c4, activation=activation, conv_layer=conv_layer)
         self.dropout = nn.Dropout(dropout)
         self.classifier = nn.Linear(c4, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.input_gate(x)
         x = self.pool1(self.block1(x))
         x = self.pool2(self.block2(x))
         x = self.pool3(self.block3(x))
@@ -176,9 +234,15 @@ def build_model(
     dropout: float = 0.2,
     real_channels: tuple[int, int, int, int] = PARAMETER_MATCHED_REAL_CHANNELS,
     complex_activation: ComplexActivation = "modrelu",
+    complex_variant: ComplexVariant = "standard",
 ) -> nn.Module:
     if mode == "real":
         return RealAmplitudeCNN(in_channels=in_channels, dropout=dropout, channels=real_channels)
     if mode == "complex":
-        return ComplexT2CNN(in_channels=in_channels, dropout=dropout, activation=complex_activation)
+        return ComplexT2CNN(
+            in_channels=in_channels,
+            dropout=dropout,
+            activation=complex_activation,
+            variant=complex_variant,
+        )
     raise ValueError(f"Unknown model mode: {mode}")

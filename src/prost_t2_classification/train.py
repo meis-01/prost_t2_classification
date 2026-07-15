@@ -17,8 +17,10 @@ from .dataset import make_dataloaders
 from .logging_utils import get_logger, timestamp_slug
 from .models import (
     COMPLEX_ACTIVATIONS,
+    COMPLEX_VARIANTS,
     PARAMETER_MATCHED_REAL_CHANNELS,
     ComplexActivation,
+    ComplexVariant,
     build_model,
 )
 
@@ -42,6 +44,7 @@ class TrainConfig:
     dropout: float = 0.2
     real_channels: Tuple[int, int, int, int] = PARAMETER_MATCHED_REAL_CHANNELS
     complex_activation: ComplexActivation = "modrelu"
+    complex_variant: ComplexVariant = "standard"
     device: Optional[str] = None
 
     def __post_init__(self) -> None:
@@ -61,6 +64,11 @@ class TrainConfig:
             raise ValueError(
                 f"Unknown complex activation {self.complex_activation!r}; "
                 f"expected one of {', '.join(COMPLEX_ACTIVATIONS)}."
+            )
+        if self.complex_variant not in COMPLEX_VARIANTS:
+            raise ValueError(
+                f"Unknown complex variant {self.complex_variant!r}; "
+                f"expected one of {', '.join(COMPLEX_VARIANTS)}."
             )
 
 
@@ -115,6 +123,7 @@ def train_model(config: TrainConfig) -> Path:
         dropout=config.dropout,
         real_channels=config.real_channels,
         complex_activation=config.complex_activation,
+        complex_variant=config.complex_variant,
     ).to(device)
     criterion = nn.BCEWithLogitsLoss(
         pos_weight=torch.tensor([loaders.pos_weight], dtype=torch.float32, device=device)
@@ -215,6 +224,8 @@ def train_model(config: TrainConfig) -> Path:
 
 def run_label_from_config(config: TrainConfig) -> str:
     if config.mode == "complex":
+        if config.complex_variant != "standard":
+            return f"complex_{config.complex_variant}_{config.complex_activation}"
         return f"complex_{config.complex_activation}"
     return config.mode
 

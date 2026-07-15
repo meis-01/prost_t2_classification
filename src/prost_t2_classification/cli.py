@@ -22,7 +22,7 @@ from .labels import (
     select_split_exams,
 )
 from .logging_utils import configure_logging
-from .models import COMPLEX_ACTIVATIONS, ComplexActivation
+from .models import COMPLEX_ACTIVATIONS, COMPLEX_VARIANTS, ComplexActivation
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -152,6 +152,12 @@ def add_train_args(
         choices=COMPLEX_ACTIVATIONS,
         default=None,
         help="Complex activation to use; defaults to modrelu.",
+    )
+    parser.add_argument(
+        "--complex-variant",
+        choices=COMPLEX_VARIANTS,
+        default="standard",
+        help="Complex architecture variant; defaults to standard.",
     )
 
 
@@ -472,6 +478,7 @@ def train_from_args(manifest: Path, args, *, light_mode: bool = False) -> None:
         "num_workers": args.num_workers,
         "device": args.device,
         "in_channels": args.in_channels,
+        "complex_variant": args.complex_variant,
     }
     if args.mode == "both":
         train_both_models(manifest, args.runs_dir, complex_activations=complex_activations, **common)
