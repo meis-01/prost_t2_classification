@@ -9,10 +9,11 @@ from torch.nn import functional as F
 
 
 ComplexActivation = Literal["modrelu"]
-ComplexVariant = Literal["standard", "widely_linear_phase"]
+ComplexVariant = Literal["standard", "widely_linear_phase", "hybrid"]
 COMPLEX_ACTIVATIONS: tuple[ComplexActivation, ...] = ("modrelu",)
-COMPLEX_VARIANTS: tuple[ComplexVariant, ...] = ("standard", "widely_linear_phase")
+COMPLEX_VARIANTS: tuple[ComplexVariant, ...] = ("standard", "widely_linear_phase", "hybrid")
 COMPLEX_CHANNELS: tuple[int, int, int, int] = (32, 64, 128, 192)
+HYBRID_REAL_CHANNELS: tuple[int, int, int, int] = (42, 84, 176, 256)
 PARAMETER_MATCHED_REAL_CHANNELS: tuple[int, int, int, int] = (64, 128, 256, 384)
 
 
@@ -192,6 +193,31 @@ class ComplexBlock(nn.Module):
         return x
 
 
+class HybridBlock(nn.Module):
+    def __init__(
+        self,
+        real_in_channels: int,
+        real_out_channels: int,
+        complex_in_channels: int,
+        complex_out_channels: int,
+        *,
+        activation: ComplexActivation,
+    ) -> None:
+        super().__init__()
+        self.real_block = _real_block(real_in_channels, real_out_channels)
+        self.complex_block = ComplexBlock(complex_in_channels, complex_out_channels, activation=activation)
+        self.complex_to_real = nn.Conv2d(complex_out_channels, real_out_channels, kernel_size=1, bias=False)
+        self.real_to_complex = nn.Conv2d(real_out_channels, complex_out_channels, kernel_size=1, bias=False)
+
+    def forward(self, real: torch.Tensor, complex_input: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        real_features = self.real_block(real)
+        complex_features = self.complex_block(complex_input)
+        real_features = real_features + self.complex_to_real(torch.abs(complex_features))
+        complex_skip = self.real_to_complex(real_features)
+        complex_features = complex_features + torch.complex(complex_skip, torch.zeros_like(complex_skip))
+        return real_features, complex_features
+
+
 class ComplexT2CNN(nn.Module):
     def __init__(
         self,
@@ -227,6 +253,50 @@ class ComplexT2CNN(nn.Module):
         return self.classifier(self.dropout(pooled)).squeeze(-1)
 
 
+class HybridComplexT2CNN(nn.Module):
+    def __init__(
+        self,
+        in_channels: int = 5,
+        dropout: float = 0.2,
+        activation: ComplexActivation = "modrelu",
+    ) -> None:
+        super().__init__()
+        r1, r2, r3, r4 = HYBRID_REAL_CHANNELS
+        c1, c2, c3, c4 = COMPLEX_CHANNELS
+        self.block1 = HybridBlock(in_channels, r1, in_channels, c1, activation=activation)
+        self.pool1 = nn.MaxPool2d(2)
+        self.complex_pool1 = ComplexAvgPool2d(2)
+        self.block2 = HybridBlock(r1, r2, c1, c2, activation=activation)
+        self.pool2 = nn.MaxPool2d(2)
+        self.complex_pool2 = ComplexAvgPool2d(2)
+        self.block3 = HybridBlock(r2, r3, c2, c3, activation=activation)
+        self.pool3 = nn.MaxPool2d(2)
+        self.complex_pool3 = ComplexAvgPool2d(2)
+        self.block4 = HybridBlock(r3, r4, c3, c4, activation=activation)
+        self.dropout = nn.Dropout(dropout)
+        self.classifier = nn.Linear(r4 + c4, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not torch.is_complex(x):
+            x = torch.complex(x, torch.zeros_like(x))
+        real = torch.abs(x)
+        complex_features = x
+        real, complex_features = self.block1(real, complex_features)
+        real = self.pool1(real)
+        complex_features = self.complex_pool1(complex_features)
+        real, complex_features = self.block2(real, complex_features)
+        real = self.pool2(real)
+        complex_features = self.complex_pool2(complex_features)
+        real, complex_features = self.block3(real, complex_features)
+        real = self.pool3(real)
+        complex_features = self.complex_pool3(complex_features)
+        real, complex_features = self.block4(real, complex_features)
+        real_pooled = F.adaptive_avg_pool2d(real, 1).flatten(1)
+        complex_pooled = F.adaptive_avg_pool2d(torch.abs(complex_features), 1).flatten(1)
+        features = torch.cat((real_pooled, complex_pooled), dim=1)
+        return self.classifier(self.dropout(features)).squeeze(-1)
+
+
 def build_model(
     mode: Literal["real", "complex"],
     *,
@@ -239,6 +309,8 @@ def build_model(
     if mode == "real":
         return RealAmplitudeCNN(in_channels=in_channels, dropout=dropout, channels=real_channels)
     if mode == "complex":
+        if complex_variant == "hybrid":
+            return HybridComplexT2CNN(in_channels=in_channels, dropout=dropout, activation=complex_activation)
         return ComplexT2CNN(
             in_channels=in_channels,
             dropout=dropout,

@@ -4,6 +4,7 @@ import pytest
 from prost_t2_classification.models import (
     COMPLEX_ACTIVATIONS,
     COMPLEX_CHANNELS,
+    COMPLEX_VARIANTS,
     InputPhaseGate,
     ModReLU,
     PARAMETER_MATCHED_REAL_CHANNELS,
@@ -70,3 +71,23 @@ def test_widely_linear_phase_variant_builds_near_real_scalar_budget():
     wide_params = _trainable_params(model)
     assert output.shape == (2,)
     assert real_params / wide_params == pytest.approx(1.0, rel=0.01)
+
+
+def test_hybrid_variant_builds_near_real_scalar_budget():
+    assert "hybrid" in COMPLEX_VARIANTS
+    x = torch.complex(torch.randn(2, 1, 32, 32), torch.randn(2, 1, 32, 32))
+    model = build_model(
+        "complex",
+        in_channels=1,
+        complex_activation="modrelu",
+        complex_variant="hybrid",
+    )
+    model.eval()
+
+    with torch.no_grad():
+        output = model(x)
+
+    real_params = _trainable_params(build_model("real", in_channels=1))
+    hybrid_params = _trainable_params(model)
+    assert output.shape == (2,)
+    assert real_params / hybrid_params == pytest.approx(1.0, rel=0.01)
