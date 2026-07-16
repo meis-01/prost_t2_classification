@@ -1,7 +1,14 @@
 import numpy as np
 import pytest
+import torch
 
-from prost_t2_classification.train import TrainConfig, binary_metrics, resolve_in_channels, tune_threshold
+from prost_t2_classification.train import (
+    TrainConfig,
+    _checkpoint_payload,
+    binary_metrics,
+    resolve_in_channels,
+    tune_threshold,
+)
 
 
 def test_tune_threshold_maximizes_validation_balanced_accuracy():
@@ -34,3 +41,27 @@ def test_training_infers_manifest_channel_count(tmp_path):
     mismatch = TrainConfig(manifest=manifest, runs_dir=tmp_path / "runs", mode="real", in_channels=5)
     with pytest.raises(ValueError, match="manifest samples contain 1 channel"):
         resolve_in_channels(mismatch)
+
+
+def test_checkpoint_payload_includes_optimizer_state():
+    model = torch.nn.Linear(2, 1)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+
+    payload = _checkpoint_payload(
+        model,
+        optimizer,
+        {"mode": "real"},
+        epoch=3,
+        score=0.7,
+        best_score=0.8,
+        bad_epochs=1,
+    )
+
+    assert "model_state" in payload
+    assert "optimizer_state" in payload
+    assert payload["config"] == {"mode": "real"}
+    assert payload["epoch"] == 3
+    assert payload["score"] == pytest.approx(0.7)
+    assert payload["best_score"] == pytest.approx(0.8)
+    assert payload["bad_epochs"] == 1
+    assert "state" in payload["optimizer_state"]

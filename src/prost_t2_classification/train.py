@@ -134,6 +134,7 @@ def train_model(config: TrainConfig) -> Path:
     bad_epochs = 0
     history: List[Dict[str, float]] = []
     best_path = run_dir / f"best_{run_label}.pt"
+    last_path = run_dir / f"last_{run_label}.pt"
 
     for epoch in range(config.epochs):
         train_stats = run_epoch(
@@ -171,15 +172,41 @@ def train_model(config: TrainConfig) -> Path:
         score = val_stats["auc"]
         if np.isnan(score):
             score = -val_stats["loss"]
+        should_stop = False
         if score > best_score:
             best_score = score
             bad_epochs = 0
-            torch.save({"model_state": model.state_dict(), "config": serializable_config}, best_path)
+            torch.save(
+                _checkpoint_payload(
+                    model,
+                    optimizer,
+                    serializable_config,
+                    epoch=epoch,
+                    score=score,
+                    best_score=best_score,
+                    bad_epochs=bad_epochs,
+                ),
+                best_path,
+            )
         else:
             bad_epochs += 1
             if bad_epochs >= config.patience:
-                logger.info("Early stopping %s after %d bad validation epochs", run_label, bad_epochs)
-                break
+                should_stop = True
+        torch.save(
+            _checkpoint_payload(
+                model,
+                optimizer,
+                serializable_config,
+                epoch=epoch,
+                score=score,
+                best_score=best_score,
+                bad_epochs=bad_epochs,
+            ),
+            last_path,
+        )
+        if should_stop:
+            logger.info("Early stopping %s after %d bad validation epochs", run_label, bad_epochs)
+            break
 
     pd.DataFrame(history).to_csv(run_dir / "history.csv", index=False)
     checkpoint = torch.load(best_path, map_location=device)
@@ -406,3 +433,24 @@ def _serializable_config(config: TrainConfig) -> Dict[str, object]:
     data["manifest"] = str(config.manifest)
     data["runs_dir"] = str(config.runs_dir)
     return data
+
+
+def _checkpoint_payload(
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    config: Dict[str, object],
+    *,
+    epoch: int,
+    score: float,
+    best_score: float,
+    bad_epochs: int,
+) -> Dict[str, object]:
+    return {
+        "model_state": model.state_dict(),
+        "optimizer_state": optimizer.state_dict(),
+        "config": config,
+        "epoch": int(epoch),
+        "score": float(score),
+        "best_score": float(best_score),
+        "bad_epochs": int(bad_epochs),
+    }
