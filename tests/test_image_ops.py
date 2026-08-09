@@ -1,9 +1,9 @@
 import numpy as np
 
 from prost_t2_classification.image_ops import (
+    align_multicoil_phase,
     center_crop_last2,
     middle_acquisition_index,
-    middle_coil_index,
     pad_coil_axis,
     scale_complex_by_magnitude,
     top_energy_coils,
@@ -13,11 +13,6 @@ from prost_t2_classification.image_ops import (
 def test_middle_acquisition_index_uses_center():
     assert middle_acquisition_index(3) == 1
     assert middle_acquisition_index(4) == 2
-
-
-def test_middle_coil_index_uses_center():
-    assert middle_coil_index(3) == 1
-    assert middle_coil_index(4) == 2
 
 
 def test_top_energy_coils_descending():
@@ -42,3 +37,16 @@ def test_scale_complex_by_magnitude_uses_robust_percentile():
     assert scaled.dtype == np.complex64
     assert np.isclose(np.abs(scaled[0, 0, 1]), 1.0)
     assert np.isclose(np.abs(scaled[0, 0, 0]), 100.0)
+
+
+def test_align_multicoil_phase_removes_global_and_coil_offsets():
+    base = np.ones((2, 4, 4), dtype=np.complex64)
+    base[0] *= np.complex64(np.exp(1j * 0.7))
+    base[1] *= np.complex64(0.5 * np.exp(1j * 1.1))
+
+    aligned = align_multicoil_phase(base, background_threshold=0)
+
+    assert np.allclose(aligned[0].imag, 0, atol=1e-6)
+    assert np.allclose(aligned[1].imag, 0, atol=1e-6)
+    assert np.allclose(aligned[0].real, 1, atol=1e-6)
+    assert np.allclose(aligned[1].real, 0.5, atol=1e-6)

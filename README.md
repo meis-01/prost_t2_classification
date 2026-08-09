@@ -2,17 +2,19 @@
 
 This project builds a T2-only classification experiment for the fastMRI prostate
 dataset. It follows the dataset paper's slice-level PI-RADS classification setup
-and official patient split, but replaces the released RSS images with the
-middle coil image from the middle T2 acquisition.
+and official patient split, but replaces the released RSS images with four
+energy-selected complex coil images from the middle T2 acquisition.
 
 The experiment compares:
 
-- a real-valued CNN that receives only coil image amplitudes;
-- a complex-valued CNN that receives the same selected coil as a complex image.
+- a real-valued CNN that receives only the selected coil amplitudes;
+- a phase-equivariant complex CNN that receives the same coils as complex images.
 
-The real CNN uses doubled channel widths to match the two-component complex
-comparison: its channel widths are `64, 128, 256, 384`, compared with complex
-widths `32, 64, 128, 192`.
+The real CNN uses scalar-parameter-matched channel widths of `45, 91, 181, 272`,
+compared with complex widths `32, 64, 128, 192`. The loader removes arbitrary
+global and per-coil phase offsets, masks phase-only background noise, preserves
+local relative phase, and applies the same robust amplitude scaling to both
+models.
 
 PI-RADS labels are binarized as in the paper: `PI-RADS > 2` is clinically
 significant prostate cancer.
@@ -47,7 +49,7 @@ or after the editable install.
 Use `--light` to run the pipeline on 20 T2 MRI exams selected from the official
 split labels: 10 training, 5 validation, and 5 test exams. Reconstruction keeps
 only the middle acquisition and middle labeled slice from each selected exam;
-NPZ preparation keeps the middle coil from that slice.
+NPZ preparation keeps up to four energy-selected coils from that slice.
 
 ```powershell
 prost-t2 run `
@@ -55,9 +57,9 @@ prost-t2 run `
   --download-script .\prostate_download_script.txt `
   --download-dir D:\fastmri_prostate_light\archives `
   --extract-dir D:\fastmri_prostate_light\raw `
-  --recon-dir D:\fastmri_prostate_light\recon_t2 `
-  --npz-dir D:\fastmri_prostate_light\npz_t2_middle_coil `
-  --runs-dir D:\fastmri_prostate_light\runs `
+  --recon-dir D:\fastmri_prostate_light\recon_t2_phase4 `
+  --npz-dir D:\fastmri_prostate_light\npz_t2_phase4 `
+  --runs-dir D:\fastmri_prostate_light\runs_phase4 `
   --epochs 1 `
   --batch-size 4
 ```
@@ -69,9 +71,9 @@ Equivalent helper script:
   -DownloadScript .\prostate_download_script.txt `
   -DownloadDir D:\fastmri_prostate_light\archives `
   -ExtractDir D:\fastmri_prostate_light\raw `
-  -ReconDir D:\fastmri_prostate_light\recon_t2 `
-  -NpzDir D:\fastmri_prostate_light\npz_t2_middle_coil `
-  -RunsDir D:\fastmri_prostate_light\runs
+  -ReconDir D:\fastmri_prostate_light\recon_t2_phase4 `
+  -NpzDir D:\fastmri_prostate_light\npz_t2_phase4 `
+  -RunsDir D:\fastmri_prostate_light\runs_phase4
 ```
 
 Light mode downloads the labels first, chooses the 20 exams, and then downloads
@@ -90,9 +92,9 @@ prost-t2 run `
   --skip-download `
   --extract-dir D:\fastmri_prostate\T2 `
   --labels D:\fastmri_prostate\labels `
-  --recon-dir D:\fastmri_prostate_light\recon_t2 `
-  --npz-dir D:\fastmri_prostate_light\npz_t2_middle_coil `
-  --runs-dir D:\fastmri_prostate_light\runs `
+  --recon-dir D:\fastmri_prostate_light\recon_t2_phase4 `
+  --npz-dir D:\fastmri_prostate_light\npz_t2_phase4 `
+  --runs-dir D:\fastmri_prostate_light\runs_phase4 `
   --epochs 1 `
   --batch-size 4
 ```
@@ -106,15 +108,23 @@ prost-t2 run `
   --skip-download `
   --extract-dir D:\fastmri_prostate\T2 `
   --labels D:\fastmri_prostate\labels `
-  --recon-dir D:\fastmri_prostate\recon_t2 `
-  --npz-dir D:\fastmri_prostate\npz_t2_middle_coil `
-  --runs-dir D:\fastmri_prostate\runs
+  --recon-dir D:\fastmri_prostate\recon_t2_phase4 `
+  --npz-dir D:\fastmri_prostate\npz_t2_phase4 `
+  --runs-dir D:\fastmri_prostate\runs_phase4 `
+  --batch-size 8 `
+  --gradient-accumulation-steps 4
 ```
 
 Equivalent helper script:
 
 ```powershell
 .\scripts\run_full_pipeline.ps1
+```
+
+Before a long CPU run, verify the configured batch fits comfortably in RAM:
+
+```powershell
+python .\scripts\check_training_memory.py --batch-size 8 --channels 4 --image-size 224
 ```
 
 To stop after reconstruction and NPZ preparation, skip training:
@@ -124,8 +134,8 @@ prost-t2 run `
   --skip-download `
   --extract-dir D:\fastmri_prostate\T2 `
   --labels D:\fastmri_prostate\labels `
-  --recon-dir D:\fastmri_prostate\recon_t2 `
-  --npz-dir D:\fastmri_prostate\npz_t2_middle_coil `
+  --recon-dir D:\fastmri_prostate\recon_t2_phase4 `
+  --npz-dir D:\fastmri_prostate\npz_t2_phase4 `
   --skip-train
 ```
 
@@ -148,13 +158,13 @@ Run selected middle-acquisition GRAPPA/IFFT reconstruction with
 reconstructs one middle labeled slice per exam:
 
 ```powershell
-prost-t2 reconstruct --raw-root D:\fastmri_prostate\T2 --labels D:\fastmri_prostate\labels --recon-dir D:\fastmri_prostate\recon_t2
+prost-t2 reconstruct --raw-root D:\fastmri_prostate\T2 --labels D:\fastmri_prostate\labels --recon-dir D:\fastmri_prostate\recon_t2_phase4 --max-coils 4
 ```
 
-Create compact NPZ samples from the middle acquisition and middle coil:
+Create compact NPZ samples from the middle acquisition and selected coils:
 
 ```powershell
-prost-t2 make-npz --labels D:\fastmri_prostate\labels --recon-dir D:\fastmri_prostate\recon_t2 --npz-dir D:\fastmri_prostate\npz_t2_middle_coil
+prost-t2 make-npz --labels D:\fastmri_prostate\labels --recon-dir D:\fastmri_prostate\recon_t2_phase4 --npz-dir D:\fastmri_prostate\npz_t2_phase4 --max-coils 4
 ```
 
 Prepare NPZ files from extracted raw data without training:
@@ -163,20 +173,21 @@ Prepare NPZ files from extracted raw data without training:
 prost-t2 prepare-npz `
   --raw-root D:\fastmri_prostate\T2 `
   --labels D:\fastmri_prostate\labels `
-  --recon-dir D:\fastmri_prostate\recon_t2 `
-  --npz-dir D:\fastmri_prostate\npz_t2_middle_coil
+  --recon-dir D:\fastmri_prostate\recon_t2_phase4 `
+  --npz-dir D:\fastmri_prostate\npz_t2_phase4 `
+  --max-coils 4
 ```
 
 Train both models:
 
 ```powershell
-prost-t2 train --manifest D:\fastmri_prostate\npz_t2_middle_coil\manifest.csv --runs-dir D:\fastmri_prostate\runs --mode both
+prost-t2 train --manifest D:\fastmri_prostate\npz_t2_phase4\manifest.csv --runs-dir D:\fastmri_prostate\runs_phase4 --mode both --batch-size 8 --gradient-accumulation-steps 4
 ```
 
 Train the complex model only:
 
 ```powershell
-prost-t2 train --manifest D:\fastmri_prostate\npz_t2_middle_coil\manifest.csv --runs-dir D:\fastmri_prostate\runs --mode complex --complex-activation modrelu
+prost-t2 train --manifest D:\fastmri_prostate\npz_t2_phase4\manifest.csv --runs-dir D:\fastmri_prostate\runs_phase4 --mode complex --complex-activation modrelu --batch-size 8 --gradient-accumulation-steps 4
 ```
 
 ## Data Decisions
@@ -188,10 +199,13 @@ prost-t2 train --manifest D:\fastmri_prostate\npz_t2_middle_coil\manifest.csv --
   exam; `--light` keeps only the middle labeled slice.
 - The selected k-space slices are reconstructed through `fastmri-tools` GRAPPA
   and centered IFFT primitives, producing a compact complex `image_complex`
-  array with one acquisition, the selected slices, and the middle coil
-  (`shape[2] // 2`).
-- Each NPZ stores `image_complex` with shape `(coils, height, width)` plus
+  array with one acquisition, the selected slices, and up to four coils ranked
+  by calibration-signal energy.
+- Each NPZ stores `image_complex` with shape `(4, height, width)` plus
   patient, slice, split, acquisition, and coil metadata.
+- Training uses class-balanced sampling. Complex training additionally applies
+  random global phase rotations; the complex convolution, RMS normalization,
+  ModReLU activation, and magnitude head are globally phase-equivariant.
 - After the best checkpoint is selected by validation AUC, the decision
   threshold is tuned on validation balanced accuracy and written to
   `threshold.json`; `test_metrics.json` uses that tuned threshold.

@@ -17,10 +17,8 @@ from .dataset import make_dataloaders
 from .logging_utils import get_logger, timestamp_slug
 from .models import (
     COMPLEX_ACTIVATIONS,
-    COMPLEX_VARIANTS,
     PARAMETER_MATCHED_REAL_CHANNELS,
     ComplexActivation,
-    ComplexVariant,
     build_model,
 )
 
@@ -34,7 +32,8 @@ class TrainConfig:
     runs_dir: Path
     mode: Mode
     epochs: int = 20
-    batch_size: int = 32
+    batch_size: int = 8
+    gradient_accumulation_steps: int = 4
     lr: float = 1e-3
     weight_decay: float = 1e-4
     patience: int = 8
@@ -44,7 +43,6 @@ class TrainConfig:
     dropout: float = 0.2
     real_channels: Tuple[int, int, int, int] = PARAMETER_MATCHED_REAL_CHANNELS
     complex_activation: ComplexActivation = "modrelu"
-    complex_variant: ComplexVariant = "standard"
     device: Optional[str] = None
 
     def __post_init__(self) -> None:
@@ -52,6 +50,8 @@ class TrainConfig:
             raise ValueError("epochs must be at least 1.")
         if self.batch_size < 1:
             raise ValueError("batch_size must be at least 1.")
+        if self.gradient_accumulation_steps < 1:
+            raise ValueError("gradient_accumulation_steps must be at least 1.")
         if self.lr <= 0:
             raise ValueError("lr must be positive.")
         if self.patience < 1:
@@ -64,11 +64,6 @@ class TrainConfig:
             raise ValueError(
                 f"Unknown complex activation {self.complex_activation!r}; "
                 f"expected one of {', '.join(COMPLEX_ACTIVATIONS)}."
-            )
-        if self.complex_variant not in COMPLEX_VARIANTS:
-            raise ValueError(
-                f"Unknown complex variant {self.complex_variant!r}; "
-                f"expected one of {', '.join(COMPLEX_VARIANTS)}."
             )
 
 
@@ -123,7 +118,6 @@ def train_model(config: TrainConfig) -> Path:
         dropout=config.dropout,
         real_channels=config.real_channels,
         complex_activation=config.complex_activation,
-        complex_variant=config.complex_variant,
     ).to(device)
     criterion = nn.BCEWithLogitsLoss(
         pos_weight=torch.tensor([loaders.pos_weight], dtype=torch.float32, device=device)
@@ -144,6 +138,7 @@ def train_model(config: TrainConfig) -> Path:
             device=device,
             optimizer=optimizer,
             desc=f"{run_label} train {epoch + 1}/{config.epochs}",
+            gradient_accumulation_steps=config.gradient_accumulation_steps,
         )
         val_stats = run_epoch(
             model,
@@ -251,8 +246,6 @@ def train_model(config: TrainConfig) -> Path:
 
 def run_label_from_config(config: TrainConfig) -> str:
     if config.mode == "complex":
-        if config.complex_variant != "standard":
-            return f"complex_{config.complex_variant}_{config.complex_activation}"
         return f"complex_{config.complex_activation}"
     return config.mode
 
@@ -295,6 +288,7 @@ def run_epoch(
     optimizer: Optional[torch.optim.Optimizer],
     desc: str,
     threshold: float = 0.5,
+    gradient_accumulation_steps: int = 1,
 ) -> Dict[str, float]:
     loss, y_true, y_score = collect_epoch_outputs(
         model,
@@ -303,6 +297,7 @@ def run_epoch(
         device=device,
         optimizer=optimizer,
         desc=desc,
+        gradient_accumulation_steps=gradient_accumulation_steps,
     )
     return epoch_metrics(loss, y_true, y_score, threshold=threshold)
 
@@ -315,6 +310,7 @@ def collect_epoch_outputs(
     device: torch.device,
     optimizer: Optional[torch.optim.Optimizer],
     desc: str,
+    gradient_accumulation_steps: int = 1,
 ) -> Tuple[float, np.ndarray, np.ndarray]:
     is_train = optimizer is not None
     model.train(is_train)
@@ -322,17 +318,24 @@ def collect_epoch_outputs(
     all_targets: List[np.ndarray] = []
     all_scores: List[np.ndarray] = []
 
+    if is_train:
+        optimizer.zero_grad(set_to_none=True)
+
     with torch.set_grad_enabled(is_train):
-        for inputs, targets in tqdm(loader, desc=desc, leave=False):
+        for batch_index, (inputs, targets) in enumerate(tqdm(loader, desc=desc, leave=False)):
             inputs = inputs.to(device)
             targets = targets.to(device).float().flatten()
-            if is_train:
-                optimizer.zero_grad(set_to_none=True)
             logits = model(inputs).flatten()
             loss = criterion(logits, targets)
             if is_train:
-                loss.backward()
-                optimizer.step()
+                (loss / gradient_accumulation_steps).backward()
+                should_step = (
+                    (batch_index + 1) % gradient_accumulation_steps == 0
+                    or batch_index + 1 == len(loader)
+                )
+                if should_step:
+                    optimizer.step()
+                    optimizer.zero_grad(set_to_none=True)
             losses.append(float(loss.detach().cpu().item()))
             all_targets.append(targets.detach().cpu().numpy())
             all_scores.append(torch.sigmoid(logits).detach().cpu().numpy())

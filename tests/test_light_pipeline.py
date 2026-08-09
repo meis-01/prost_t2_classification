@@ -222,6 +222,7 @@ def test_reconstruct_selected_t2_file_writes_single_acquisition_slice(tmp_path):
         + 1j * np.ones((3, 4, 2, 4, 4), dtype=np.float32)
     ).astype(np.complex64)
     calibration = np.ones((4, 2, 4, 4), dtype=np.complex64)
+    calibration[:, 1] *= 4
 
     with h5py.File(input_path, "w") as h5:
         h5.create_dataset("kspace", data=kspace)
@@ -234,18 +235,20 @@ def test_reconstruct_selected_t2_file_writes_single_acquisition_slice(tmp_path):
         grappa_fill=grappa_fill,
         kernel_size=(3, 3),
         slice_numbers_one_based=(3,),
+        max_coils=2,
     )
 
-    assert result.image_complex_shape == (1, 1, 1, 4, 4)
-    assert result.coil_indices == (1,)
+    assert result.image_complex_shape == (1, 1, 2, 4, 4)
+    assert result.coil_indices == (1, 0)
     with h5py.File(output_path, "r") as h5:
-        assert h5["image_complex"].shape == (1, 1, 1, 4, 4)
+        assert h5["image_complex"].shape == (1, 1, 2, 4, 4)
         assert "kspace_regridded" not in h5
         assert "kspace_grappa" not in h5
         assert h5.attrs["subset_reconstruction"] == np.True_
         assert h5.attrs["selected_acquisition_index"] == 1
         assert h5.attrs["selected_slice_indices"].tolist() == [2]
-        assert h5.attrs["selected_coil_indices"].tolist() == [1]
+        assert h5.attrs["selected_coil_indices"].tolist() == [1, 0]
+        assert h5.attrs["coil_selection"] == "calibration_energy_descending"
 
 
 def test_reconstruct_t2_dataset_skips_failed_files(tmp_path, monkeypatch):
@@ -348,10 +351,10 @@ def test_make_npz_dataset_skips_missing_reconstructions(tmp_path):
         "file_prostate_AXT2_001.h5",
     ]
     assert manifest["slice"].tolist() == [1, 2]
-    assert manifest["selected_coils"].astype(str).tolist() == ["1", "1"]
+    assert manifest["selected_coils"].astype(str).tolist() == ["2", "2"]
     with np.load(npz_root / manifest.iloc[0]["path"]) as npz:
         assert npz["image_complex"].shape == (1, 4, 4)
-        assert np.all(npz["image_complex"] == np.complex64(7 + 3j))
+        assert np.all(npz["image_complex"] == np.complex64(12 + 0j))
     failures = pd.read_csv(npz_root / "failed_npz.csv")
     assert failures["fastmri_rawfile"].tolist() == ["file_prostate_AXT2_002.h5"]
     assert failures["error_type"].tolist() == ["FileNotFoundError"]

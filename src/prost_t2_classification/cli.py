@@ -22,7 +22,7 @@ from .labels import (
     select_split_exams,
 )
 from .logging_utils import configure_logging
-from .models import COMPLEX_ACTIVATIONS, COMPLEX_VARIANTS, ComplexActivation
+from .models import COMPLEX_ACTIVATIONS, ComplexActivation
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -57,6 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
     recon_parser.add_argument("--labels", type=Path, default=None, help="Label CSV or directory; defaults to raw root when light/limits are used")
     recon_parser.add_argument("--recon-dir", type=Path, required=True)
     recon_parser.add_argument("--kernel-size", default="5,5")
+    recon_parser.add_argument("--max-coils", type=int, default=4)
     recon_parser.add_argument("--overwrite", action="store_true")
     recon_parser.add_argument("--limit", type=int, default=None)
     recon_parser.add_argument("--limit-patients", type=int, default=None)
@@ -69,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     npz_parser.add_argument("--recon-dir", type=Path, required=True)
     npz_parser.add_argument("--npz-dir", type=Path, required=True)
     npz_parser.add_argument("--crop-size", type=int, default=224)
-    npz_parser.add_argument("--max-coils", type=int, default=1)
+    npz_parser.add_argument("--max-coils", type=int, default=4)
     npz_parser.add_argument("--overwrite", action="store_true")
     npz_parser.add_argument("--limit-patients", type=int, default=None)
     npz_parser.add_argument("--limit-slices", type=int, default=None)
@@ -85,7 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--recon-dir", type=Path, required=True)
     prepare_parser.add_argument("--npz-dir", type=Path, required=True)
     prepare_parser.add_argument("--crop-size", type=int, default=224)
-    prepare_parser.add_argument("--max-coils", type=int, default=1)
+    prepare_parser.add_argument("--max-coils", type=int, default=4)
     prepare_parser.add_argument("--kernel-size", default="5,5")
     prepare_parser.add_argument("--overwrite", action="store_true")
     prepare_parser.add_argument("--skip-reconstruct", action="store_true")
@@ -114,7 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--skip-train", action="store_true")
     run_parser.add_argument("--overwrite", action="store_true")
     run_parser.add_argument("--crop-size", type=int, default=224)
-    run_parser.add_argument("--max-coils", type=int, default=1)
+    run_parser.add_argument("--max-coils", type=int, default=4)
     run_parser.add_argument("--kernel-size", default="5,5")
     add_light_args(run_parser)
     add_train_args(run_parser, include_manifest=False, include_runs_dir=False)
@@ -134,7 +135,8 @@ def add_train_args(
         parser.add_argument("--runs-dir", type=Path, required=include_manifest)
     parser.add_argument("--mode", choices=("real", "complex", "both"), default="both")
     parser.add_argument("--epochs", type=int, default=20)
-    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--gradient-accumulation-steps", type=int, default=4)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--patience", type=int, default=8)
@@ -152,12 +154,6 @@ def add_train_args(
         choices=COMPLEX_ACTIVATIONS,
         default=None,
         help="Complex activation to use; defaults to modrelu.",
-    )
-    parser.add_argument(
-        "--complex-variant",
-        choices=COMPLEX_VARIANTS,
-        default="standard",
-        help="Complex architecture variant; defaults to standard.",
     )
 
 
@@ -310,6 +306,7 @@ def cmd_reconstruct(args) -> int:
         skip_existing=not args.overwrite,
         limit=args.limit,
         selected_labels=selected_labels,
+        max_coils=args.max_coils,
     )
     return 0
 
@@ -351,6 +348,7 @@ def cmd_prepare_npz(args) -> int:
             skip_existing=not args.overwrite,
             limit=args.limit,
             selected_labels=selected_labels,
+            max_coils=args.max_coils,
         )
     make_npz_dataset(
         args.labels or args.raw_root,
@@ -394,12 +392,12 @@ def cmd_run(args) -> int:
         else args.extract_dir
     )
     recon_dir = (
-        choose_path(args.recon_dir, "Reconstruction output directory", base / "data" / "recon_t2")
+        choose_path(args.recon_dir, "Reconstruction output directory", base / "data" / "recon_t2_phase4")
         if needs_recon_dir
         else args.recon_dir
     )
     npz_dir = (
-        choose_path(args.npz_dir, "Selected-coil NPZ directory", base / "data" / "npz_t2_middle_coil")
+        choose_path(args.npz_dir, "Selected-coil NPZ directory", base / "data" / "npz_t2_phase4")
         if needs_npz_dir
         else args.npz_dir
     )
@@ -440,6 +438,7 @@ def cmd_run(args) -> int:
             kernel_size=parse_kernel_size(args.kernel_size),
             skip_existing=not args.overwrite,
             selected_labels=selected_labels,
+            max_coils=args.max_coils,
         )
 
     manifest = npz_dir / "manifest.csv" if npz_dir is not None else None
@@ -478,7 +477,7 @@ def train_from_args(manifest: Path, args, *, light_mode: bool = False) -> None:
         "num_workers": args.num_workers,
         "device": args.device,
         "in_channels": args.in_channels,
-        "complex_variant": args.complex_variant,
+        "gradient_accumulation_steps": args.gradient_accumulation_steps,
     }
     if args.mode == "both":
         train_both_models(manifest, args.runs_dir, complex_activations=complex_activations, **common)

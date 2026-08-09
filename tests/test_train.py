@@ -6,6 +6,7 @@ from prost_t2_classification.train import (
     TrainConfig,
     _checkpoint_payload,
     binary_metrics,
+    collect_epoch_outputs,
     resolve_in_channels,
     tune_threshold,
 )
@@ -65,3 +66,30 @@ def test_checkpoint_payload_includes_optimizer_state():
     assert payload["best_score"] == pytest.approx(0.8)
     assert payload["bad_epochs"] == 1
     assert "state" in payload["optimizer_state"]
+
+
+def test_gradient_accumulation_steps_final_partial_group():
+    model = torch.nn.Linear(2, 1)
+    inputs = torch.ones(3, 2)
+    targets = torch.tensor([0.0, 1.0, 1.0])
+    loader = torch.utils.data.DataLoader(
+        torch.utils.data.TensorDataset(inputs, targets),
+        batch_size=1,
+    )
+    criterion = torch.nn.BCEWithLogitsLoss()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    before = model.weight.detach().clone()
+
+    _, y_true, y_score = collect_epoch_outputs(
+        model,
+        loader,
+        criterion,
+        device=torch.device("cpu"),
+        optimizer=optimizer,
+        desc="test",
+        gradient_accumulation_steps=2,
+    )
+
+    assert not torch.equal(before, model.weight.detach())
+    assert y_true.tolist() == [0, 1, 1]
+    assert y_score.shape == (3,)

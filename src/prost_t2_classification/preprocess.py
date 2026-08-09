@@ -12,8 +12,8 @@ from tqdm import tqdm
 from .image_ops import (
     center_crop_last2,
     middle_acquisition_index,
-    middle_coil_index,
     pad_coil_axis,
+    top_energy_coils,
 )
 from .labels import (
     load_t2_labels,
@@ -96,6 +96,7 @@ def reconstruct_t2_dataset(
     skip_existing: bool = True,
     limit: Optional[int] = None,
     selected_labels=None,
+    max_coils: int = 4,
 ) -> List[Path]:
     logger = get_logger()
     try:
@@ -106,6 +107,8 @@ def reconstruct_t2_dataset(
             "fastmri-tools is required for reconstruction. Install with `python -m pip install fastmri-tools`."
         ) from exc
 
+    if max_coils <= 0:
+        raise ValueError("max_coils must be positive.")
     jobs = build_reconstruction_jobs(raw_root, recon_root, selected_labels=selected_labels)
     if limit is not None:
         jobs = jobs[:limit]
@@ -117,10 +120,20 @@ def reconstruct_t2_dataset(
     failure_path = recon_root / "failed_reconstructions.csv"
     logger.info("Starting selected T2 reconstruction for %d files", len(jobs))
     for job in tqdm(jobs, desc="reconstruct T2"):
-        if job.output_path.exists() and skip_existing:
+        if (
+            job.output_path.exists()
+            and skip_existing
+            and reconstruction_has_requested_coils(job.output_path, max_coils=max_coils)
+        ):
             outputs.append(job.output_path)
             logger.info("Skipping existing reconstruction %s", job.output_path)
             continue
+        if job.output_path.exists() and skip_existing:
+            logger.info(
+                "Rebuilding %s because its coil selection does not match max_coils=%d",
+                job.output_path,
+                max_coils,
+            )
         job.output_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             result = reconstruct_selected_t2_file(
@@ -130,6 +143,7 @@ def reconstruct_t2_dataset(
                 grappa_fill=grappa_fill,
                 kernel_size=kernel_size,
                 slice_numbers_one_based=job.slice_numbers_one_based,
+                max_coils=max_coils,
             )
         except SKIPPABLE_DATA_ERRORS as exc:
             job.output_path.unlink(missing_ok=True)
@@ -166,6 +180,25 @@ def reconstruct_t2_dataset(
     return outputs
 
 
+def reconstruction_has_requested_coils(path: Path, *, max_coils: int) -> bool:
+    try:
+        with h5py.File(path, "r") as h5:
+            image = h5["image_complex"]
+            original_shape = tuple(
+                int(value) for value in str(_attr_value(h5.attrs["original_kspace_shape"])).split(",")
+            )
+            expected_coils = min(max_coils, original_shape[2])
+            selected = np.asarray(h5.attrs["selected_coil_indices"]).reshape(-1)
+            return (
+                image.ndim == 5
+                and image.shape[2] == expected_coils
+                and len(selected) == expected_coils
+                and h5.attrs.get("coil_selection") == "calibration_energy_descending"
+            )
+    except (OSError, KeyError, TypeError, ValueError):
+        return False
+
+
 def reconstruct_selected_t2_file(
     input_path: Path,
     output_path: Path,
@@ -174,6 +207,7 @@ def reconstruct_selected_t2_file(
     grappa_fill,
     kernel_size: Tuple[int, int],
     slice_numbers_one_based: Optional[Iterable[int]],
+    max_coils: int = 4,
 ) -> ReconstructionResult:
     with h5py.File(input_path, "r") as h5:
         if "kspace" not in h5:
@@ -196,8 +230,12 @@ def reconstruct_selected_t2_file(
 
         original_shape = tuple(kspace_dataset.shape)
         acquisition_index = middle_acquisition_index(original_shape[0])
-        coil_indices = (middle_coil_index(original_shape[2]),)
         slice_indices = selected_slice_indices(slice_numbers_one_based, original_shape[1], input_path)
+        coil_indices = select_energy_coil_indices(
+            calibration_dataset,
+            slice_indices,
+            max_coils=max_coils,
+        )
         source_attrs = {key: _attr_value(value) for key, value in h5.attrs.items()}
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -225,7 +263,7 @@ def reconstruct_selected_t2_file(
                     grappa_fill(kspace, calibration, kernel_size=kernel_size),
                     axes=(-2, -1),
                 ).astype(np.complex64, copy=False)
-                image_complex = image_complex[:, :, coil_indices[0] : coil_indices[0] + 1]
+                image_complex = image_complex[:, :, list(coil_indices)]
 
                 if image_dataset is None:
                     image_complex_shape = (1, len(slice_indices), *image_complex.shape[2:])
@@ -248,6 +286,22 @@ def reconstruct_selected_t2_file(
         slice_indices=slice_indices,
         coil_indices=coil_indices,
     )
+
+
+def select_energy_coil_indices(
+    calibration_dataset,
+    slice_indices: Tuple[int, ...],
+    *,
+    max_coils: int,
+) -> Tuple[int, ...]:
+    if max_coils <= 0:
+        raise ValueError("max_coils must be positive.")
+    num_coils = int(calibration_dataset.shape[1])
+    energy = np.zeros(num_coils, dtype=np.float64)
+    for slice_index in slice_indices:
+        calibration = _as_complex(calibration_dataset[slice_index])
+        energy += np.sum(np.abs(calibration) ** 2, axis=(-2, -1), dtype=np.float64)
+    return tuple(int(index) for index in top_energy_coils(energy, max_coils=max_coils))
 
 
 def selected_slice_indices(
@@ -292,6 +346,7 @@ def write_reconstruction_metadata(
     h5.attrs["selected_slices"] = np.asarray([index + 1 for index in slice_indices], dtype=np.int32)
     h5.attrs["selected_coil_indices"] = np.asarray(coil_indices, dtype=np.int32)
     h5.attrs["selected_coils"] = np.asarray([index + 1 for index in coil_indices], dtype=np.int32)
+    h5.attrs["coil_selection"] = "calibration_energy_descending"
 
     source_attrs_group = h5.create_group("source_attrs")
     for key, value in source_attrs.items():
@@ -497,10 +552,12 @@ def prepare_npz_rows_for_exam(
             )
             source_coils, already_selected = reconstruction_coil_indices(h5, all_coils_slice.shape[0])
             if already_selected:
-                selected_coils = source_coils
-                selected = all_coils_slice
+                keep_count = min(max_coils, all_coils_slice.shape[0])
+                selected_coils = source_coils[:keep_count]
+                selected = all_coils_slice[:keep_count]
             else:
-                local_coil_indices = np.asarray([middle_coil_index(all_coils_slice.shape[0])], dtype=np.int64)
+                energy = np.sum(np.abs(all_coils_slice) ** 2, axis=(-2, -1), dtype=np.float64)
+                local_coil_indices = top_energy_coils(energy, max_coils=max_coils)
                 selected_coils = source_coils[local_coil_indices]
                 selected = all_coils_slice[local_coil_indices]
             selected = center_crop_last2(selected, crop_size)
