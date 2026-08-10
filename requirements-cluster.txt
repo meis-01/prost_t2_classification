@@ -1,7 +1,0 @@
-# Training-only dependencies for the CPU experiment on CECI/Lemaitre4.
-# PyTorch is installed separately from the official CPU wheel index, or supplied
-# by a compatible module loaded before the experiment script is launched.
-numpy==1.26.4
-pandas==2.2.3
-scikit-learn==1.5.2
-tqdm==4.67.1

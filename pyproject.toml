@@ -7,17 +7,17 @@ name = "prost-t2-classification"
 version = "0.3.0"
 description = "Paired real-vs-complex classification from prepared four-coil prostate T2 NPZ data."
 readme = "README.md"
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.10"
 dependencies = [
-  "numpy>=1.26,<2",
-  "pandas>=2.2,<3",
+  "numpy>=1.26,<3",
+  "pandas>=2.2,<4",
   "scikit-learn>=1.5,<2",
   "torch>=2.2,<3",
   "tqdm>=4.67,<5"
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8,<9"]
+dev = ["pytest>=8,<10"]
 
 [tool.setuptools]
 package-dir = { "" = "src" }
