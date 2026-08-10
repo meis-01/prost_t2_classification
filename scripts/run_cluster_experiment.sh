@@ -144,6 +144,7 @@ PY
     "${VENV_DIR}/bin/python" -m pip install --no-deps --editable "${REPO_ROOT}"
     "${VENV_DIR}/bin/python" - <<'PY'
 import platform
+import sys
 
 import numpy
 import pandas
@@ -152,8 +153,10 @@ import torch
 import tqdm
 import prost_t2_classification
 
-if torch.cuda.is_available():
-    raise SystemExit("This CPU experiment unexpectedly resolved a CUDA device")
+if not ((3, 10) <= sys.version_info[:2] <= (3, 12)):
+    raise SystemExit(f"The virtual environment uses unsupported Python {platform.python_version()}")
+if torch.version.cuda is not None:
+    raise SystemExit(f"Expected a CPU-only PyTorch build, found CUDA {torch.version.cuda}")
 print(
     f"Environment ready: Python {platform.python_version()}, PyTorch {torch.__version__}, "
     f"NumPy {numpy.__version__}, CPU-only"
@@ -168,24 +171,25 @@ validate_data() {
 from pathlib import Path
 import sys
 
+import numpy as np
 import pandas as pd
+from prost_t2_classification.dataset import validate_manifest
 
 manifest_path = Path(sys.argv[1])
 frame = pd.read_csv(manifest_path)
-required = {"path", "label", "data_split", "channels"}
-missing_columns = sorted(required.difference(frame.columns))
-if missing_columns:
-    raise SystemExit(f"Manifest is missing columns: {missing_columns}")
-if frame.empty:
-    raise SystemExit("Manifest is empty")
+validate_manifest(frame)
 missing_files = [value for value in frame["path"] if not (manifest_path.parent / str(value)).is_file()]
 if missing_files:
     preview = ", ".join(map(str, missing_files[:5]))
     raise SystemExit(f"Manifest refers to {len(missing_files)} missing sample(s), including: {preview}")
-split_counts = frame["data_split"].astype(str).str.lower().value_counts().to_dict()
-channel_counts = sorted({int(value) for value in frame["channels"].dropna()})
-if channel_counts != [4]:
-    raise SystemExit(f"Expected exactly four channels in every sample; found {channel_counts}")
+split_counts = frame["data_split"].astype(str).str.strip().str.lower().value_counts().to_dict()
+first_sample = manifest_path.parent / str(frame.iloc[0]["path"])
+with np.load(first_sample) as sample:
+    if "image_complex" not in sample:
+        raise SystemExit(f"{first_sample} does not contain image_complex")
+    image = sample["image_complex"]
+if image.ndim != 3 or image.shape[0] != 4 or not np.iscomplexobj(image):
+    raise SystemExit(f"{first_sample} image_complex must be a complex array with shape (4, height, width)")
 print(f"Validated {len(frame)} samples; split counts: {split_counts}; channels: 4")
 PY
 }
@@ -261,6 +265,7 @@ submit_experiment() {
     check_configuration
     check_repository
     [[ ! -e "${EXPERIMENT_ROOT}/submission.txt" ]] || die "${EXPERIMENT_ROOT} was already submitted. Set a new EXPERIMENT_NAME."
+    [[ ! -e "${EXPERIMENT_ROOT}/submission.partial" ]] || die "${EXPERIMENT_ROOT} has a partial submission. Inspect its job IDs before retrying."
 
     ensure_environment
     validate_data
@@ -268,7 +273,8 @@ submit_experiment() {
     write_submission_metadata
     export_job_environment
 
-    local pilot_job array_job summary_job array_last array_spec
+    local pilot_job array_job summary_job array_last array_spec submission_partial
+    submission_partial="${EXPERIMENT_ROOT}/submission.partial"
     pilot_job="$(sbatch --parsable \
         --job-name=prost-pilot \
         --partition="${PARTITION}" \
@@ -284,6 +290,7 @@ submit_experiment() {
         --export=ALL \
         "${SCRIPT_PATH}" __worker phase1)"
     pilot_job="${pilot_job%%;*}"
+    printf 'phase1_job=%s\n' "${pilot_job}" | tee "${submission_partial}"
 
     array_last=$((PHASE2_SEEDS - 1))
     array_spec="0-${array_last}%${MAX_PARALLEL}"
@@ -304,6 +311,7 @@ submit_experiment() {
         --export=ALL \
         "${SCRIPT_PATH}" __worker phase2)"
     array_job="${array_job%%;*}"
+    printf 'phase2_array_job=%s\n' "${array_job}" | tee -a "${submission_partial}"
 
     summary_job="$(sbatch --parsable \
         --job-name=prost-summary \
@@ -320,12 +328,9 @@ submit_experiment() {
         --export=ALL \
         "${SCRIPT_PATH}" __summarize "${array_job}")"
     summary_job="${summary_job%%;*}"
-
-    {
-        printf 'phase1_job=%s\n' "${pilot_job}"
-        printf 'phase2_array_job=%s\n' "${array_job}"
-        printf 'summary_job=%s\n' "${summary_job}"
-    } | tee "${EXPERIMENT_ROOT}/submission.txt"
+    printf 'summary_job=%s\n' "${summary_job}" | tee -a "${submission_partial}"
+    mv -- "${submission_partial}" "${EXPERIMENT_ROOT}/submission.txt"
+    cat "${EXPERIMENT_ROOT}/submission.txt"
 
     printf '\nPhase two contains %s paired seeds and starts only if phase one succeeds.\n' "${PHASE2_SEEDS}"
     printf 'Monitor with: squeue -j %s,%s,%s\n' "${pilot_job}" "${array_job}" "${summary_job}"

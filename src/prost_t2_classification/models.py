@@ -15,11 +15,11 @@ PARAMETER_MATCHED_REAL_CHANNELS: tuple[int, int, int, int] = (45, 91, 181, 272)
 
 
 class RealAmplitudeCNN(nn.Module):
-    def __init__(self, in_channels: int = 4) -> None:
+    def __init__(self) -> None:
         super().__init__()
         c1, c2, c3, c4 = PARAMETER_MATCHED_REAL_CHANNELS
         self.features = nn.Sequential(
-            _real_block(in_channels, c1),
+            _real_block(4, c1),
             nn.MaxPool2d(2),
             _real_block(c1, c2),
             nn.MaxPool2d(2),
@@ -155,10 +155,10 @@ class ComplexBlock(nn.Module):
 
 
 class ComplexT2CNN(nn.Module):
-    def __init__(self, in_channels: int = 4) -> None:
+    def __init__(self) -> None:
         super().__init__()
         c1, c2, c3, c4 = COMPLEX_CHANNELS
-        self.block1 = ComplexBlock(in_channels, c1)
+        self.block1 = ComplexBlock(4, c1)
         self.pool1 = ComplexMagnitudeMaxPool2d(2)
         self.block2 = ComplexBlock(c1, c2)
         self.pool2 = ComplexMagnitudeMaxPool2d(2)
@@ -177,13 +177,9 @@ class ComplexT2CNN(nn.Module):
         return self.classifier(self.dropout(pooled)).squeeze(-1)
 
 
-def build_model(
-    mode: Literal["real", "complex"],
-    *,
-    in_channels: int = 4,
-) -> nn.Module:
+def build_model(mode: Literal["real", "complex"]) -> nn.Module:
     if mode == "real":
-        return RealAmplitudeCNN(in_channels=in_channels)
+        return RealAmplitudeCNN()
     if mode == "complex":
-        return ComplexT2CNN(in_channels=in_channels)
+        return ComplexT2CNN()
     raise ValueError(f"Unknown model mode: {mode}")

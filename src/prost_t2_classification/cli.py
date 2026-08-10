@@ -26,7 +26,6 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--patience", type=int, default=8)
     train_parser.add_argument("--seed", type=int, default=10383)
     train_parser.add_argument("--num-workers", type=int, default=0)
-    train_parser.add_argument("--in-channels", type=int, default=None)
     train_parser.add_argument("--device", default=None)
     train_parser.set_defaults(func=cmd_train)
     return parser
@@ -54,7 +53,6 @@ def cmd_train(args: argparse.Namespace) -> int:
         "patience": args.patience,
         "seed": args.seed,
         "num_workers": args.num_workers,
-        "in_channels": args.in_channels,
         "device": args.device,
     }
     if args.mode == "both":

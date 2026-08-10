@@ -4,9 +4,10 @@ import pandas as pd
 
 
 def patient_split_sets(labels: pd.DataFrame) -> dict[str, set[int]]:
+    normalized_splits = labels["data_split"].astype(str).str.strip().str.lower()
     return {
         split: set(group["fastmri_pt_id"].astype(int).tolist())
-        for split, group in labels.groupby("data_split")
+        for split, group in labels.groupby(normalized_splits)
     }
 
 

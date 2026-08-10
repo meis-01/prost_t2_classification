@@ -7,7 +7,6 @@ from prost_t2_classification.train import (
     _checkpoint_payload,
     binary_metrics,
     collect_epoch_outputs,
-    resolve_in_channels,
     train_both_models,
     tune_threshold,
 )
@@ -31,18 +30,6 @@ def test_tune_threshold_falls_back_to_half_for_single_class_validation():
     y_score = np.array([0.1, 0.2, 0.3], dtype=np.float32)
 
     assert tune_threshold(y_true, y_score) == 0.5
-
-
-def test_training_infers_manifest_channel_count(tmp_path):
-    manifest = tmp_path / "manifest.csv"
-    manifest.write_text("path,channels\nsamples/a.npz,1\n", encoding="utf-8")
-
-    config = TrainConfig(manifest=manifest, runs_dir=tmp_path / "runs", mode="real")
-    assert resolve_in_channels(config) == 1
-
-    mismatch = TrainConfig(manifest=manifest, runs_dir=tmp_path / "runs", mode="real", in_channels=5)
-    with pytest.raises(ValueError, match="manifest samples contain 1 channel"):
-        resolve_in_channels(mismatch)
 
 
 def test_checkpoint_payload_includes_optimizer_state():
@@ -70,29 +57,63 @@ def test_checkpoint_payload_includes_optimizer_state():
 
 
 def test_gradient_accumulation_steps_final_partial_group():
-    model = torch.nn.Linear(2, 1)
-    inputs = torch.ones(3, 2)
-    targets = torch.tensor([0.0, 1.0, 1.0])
+    reference_model = torch.nn.Linear(2, 1)
+    accumulated_model = torch.nn.Linear(2, 1)
+    accumulated_model.load_state_dict(reference_model.state_dict())
+    inputs = torch.tensor([[0.5, -1.0]])
+    targets = torch.tensor([1.0])
     loader = torch.utils.data.DataLoader(
         torch.utils.data.TensorDataset(inputs, targets),
         batch_size=1,
     )
     criterion = torch.nn.BCEWithLogitsLoss()
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
-    before = model.weight.detach().clone()
+    reference_optimizer = torch.optim.SGD(reference_model.parameters(), lr=0.1)
+    accumulated_optimizer = torch.optim.SGD(accumulated_model.parameters(), lr=0.1)
 
-    _, y_true, y_score = collect_epoch_outputs(
-        model,
+    collect_epoch_outputs(
+        reference_model,
         loader,
         criterion,
         device=torch.device("cpu"),
-        optimizer=optimizer,
-        desc="test",
-        gradient_accumulation_steps=2,
+        optimizer=reference_optimizer,
+        desc="reference",
+        gradient_accumulation_steps=1,
+    )
+    collect_epoch_outputs(
+        accumulated_model,
+        loader,
+        criterion,
+        device=torch.device("cpu"),
+        optimizer=accumulated_optimizer,
+        desc="accumulated",
+        gradient_accumulation_steps=4,
     )
 
-    assert not torch.equal(before, model.weight.detach())
-    assert y_true.tolist() == [0, 1, 1]
+    for reference, accumulated in zip(reference_model.parameters(), accumulated_model.parameters()):
+        assert torch.allclose(reference, accumulated)
+
+
+def test_epoch_loss_is_weighted_by_sample_count():
+    inputs = torch.tensor([[0.0], [0.0], [10.0]])
+    targets = torch.zeros(3)
+    loader = torch.utils.data.DataLoader(
+        torch.utils.data.TensorDataset(inputs, targets),
+        batch_size=2,
+    )
+    criterion = torch.nn.BCEWithLogitsLoss()
+
+    loss, y_true, y_score = collect_epoch_outputs(
+        torch.nn.Identity(),
+        loader,
+        criterion,
+        device=torch.device("cpu"),
+        optimizer=None,
+        desc="weighted loss",
+    )
+    expected = criterion(inputs.flatten(), targets).item()
+
+    assert loss == pytest.approx(expected)
+    assert y_true.tolist() == [0, 0, 0]
     assert y_score.shape == (3,)
 
 

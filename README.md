@@ -21,7 +21,9 @@ data/
 ```
 
 Each NPZ must contain `image_complex` with shape `(4, height, width)`. Manifest
-paths are relative to `manifest.csv`.
+paths are relative to `manifest.csv`. The manifest must contain `path`,
+`fastmri_pt_id`, `label`, `data_split`, and `channels`; every training,
+validation, and test split must contain both labels.
 
 ## CECI/Lemaitre4
 

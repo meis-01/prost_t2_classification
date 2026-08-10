@@ -15,9 +15,9 @@ def _trainable_params(model):
 
 
 def test_complex_model_builds():
-    x = torch.complex(torch.randn(2, 5, 32, 32), torch.randn(2, 5, 32, 32))
+    x = torch.complex(torch.randn(2, 4, 32, 32), torch.randn(2, 4, 32, 32))
 
-    model = build_model("complex", in_channels=5)
+    model = build_model("complex")
     model.eval()
     with torch.no_grad():
         output = model(x)
@@ -59,15 +59,15 @@ def test_real_model_matches_complex_scalar_parameter_budget():
     expected = tuple(round(channel * 2**0.5) for channel in COMPLEX_CHANNELS)
     assert PARAMETER_MATCHED_REAL_CHANNELS == expected
 
-    real_params = _trainable_params(build_model("real", in_channels=4))
-    complex_params = _trainable_params(build_model("complex", in_channels=4))
+    real_params = _trainable_params(build_model("real"))
+    complex_params = _trainable_params(build_model("complex"))
 
     assert real_params / complex_params == pytest.approx(1.0, rel=0.01)
 
 
 def test_complex_model_is_invariant_to_global_phase():
     x = torch.complex(torch.randn(2, 4, 32, 32), torch.randn(2, 4, 32, 32))
-    model = build_model("complex", in_channels=4)
+    model = build_model("complex")
     model.eval()
     rotation = torch.polar(torch.tensor(1.0), torch.tensor(1.234))
 

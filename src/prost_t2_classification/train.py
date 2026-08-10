@@ -34,7 +34,6 @@ class TrainConfig:
     patience: int = 8
     seed: int = 10383
     num_workers: int = 0
-    in_channels: int | None = None
     device: str | None = None
 
     def __post_init__(self) -> None:
@@ -46,10 +45,14 @@ class TrainConfig:
             raise ValueError("gradient_accumulation_steps must be at least 1.")
         if self.lr <= 0:
             raise ValueError("lr must be positive.")
+        if self.weight_decay < 0:
+            raise ValueError("weight_decay must be non-negative.")
         if self.patience < 1:
             raise ValueError("patience must be at least 1.")
-        if self.in_channels is not None and self.in_channels < 1:
-            raise ValueError("in_channels must be at least 1.")
+        if self.num_workers < 0:
+            raise ValueError("num_workers must be non-negative.")
+        if self.mode not in ("real", "complex"):
+            raise ValueError(f"Unknown model mode: {self.mode}")
 
 
 def train_both_models(
@@ -73,9 +76,7 @@ def train_model(config: TrainConfig) -> Path:
     run_label = run_label_from_config(config)
     run_dir = config.runs_dir / f"{timestamp_slug()}_{run_label}"
     run_dir.mkdir(parents=True, exist_ok=True)
-    in_channels = resolve_in_channels(config)
     serializable_config = _serializable_config(config)
-    serializable_config["resolved_in_channels"] = in_channels
     (run_dir / "config.json").write_text(
         json.dumps(serializable_config, indent=2),
         encoding="utf-8",
@@ -89,16 +90,16 @@ def train_model(config: TrainConfig) -> Path:
         mode=config.mode,
         batch_size=config.batch_size,
         num_workers=config.num_workers,
+        seed=config.seed,
     )
-    model = build_model(config.mode, in_channels=in_channels).to(device)
-    criterion = nn.BCEWithLogitsLoss(
-        pos_weight=torch.tensor([loaders.pos_weight], dtype=torch.float32, device=device)
-    )
+    model = build_model(config.mode).to(device)
+    criterion = nn.BCEWithLogitsLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
 
     best_score = -np.inf
     bad_epochs = 0
     history: list[dict[str, float]] = []
+    history_path = run_dir / "history.csv"
     best_path = run_dir / f"best_{run_label}.pt"
     last_path = run_dir / f"last_{run_label}.pt"
 
@@ -126,10 +127,11 @@ def train_model(config: TrainConfig) -> Path:
             **{f"val_{key}": value for key, value in val_stats.items()},
         }
         history.append(record)
+        pd.DataFrame(history).to_csv(history_path, index=False)
         logger.info(
             "%s epoch=%d train_loss=%.4f train_auc=%.4f val_loss=%.4f val_auc=%.4f",
             run_label,
-            epoch,
+            epoch + 1,
             train_stats["loss"],
             train_stats["auc"],
             val_stats["loss"],
@@ -175,8 +177,7 @@ def train_model(config: TrainConfig) -> Path:
             logger.info("Early stopping %s after %d bad validation epochs", run_label, bad_epochs)
             break
 
-    pd.DataFrame(history).to_csv(run_dir / "history.csv", index=False)
-    checkpoint = torch.load(best_path, map_location=device)
+    checkpoint = torch.load(best_path, map_location=device, weights_only=False)
     model.load_state_dict(checkpoint["model_state"])
     val_loss, val_true, val_score = collect_epoch_outputs(
         model,
@@ -222,35 +223,6 @@ def run_label_from_config(config: TrainConfig) -> str:
     return config.mode
 
 
-def resolve_in_channels(config: TrainConfig) -> int:
-    manifest_channels = infer_manifest_channels(config.manifest)
-    if config.in_channels is None:
-        return manifest_channels
-    if config.in_channels != manifest_channels:
-        raise ValueError(
-            f"--in-channels is {config.in_channels}, but manifest samples contain {manifest_channels} channel(s)."
-        )
-    return config.in_channels
-
-
-def infer_manifest_channels(manifest_path: Path) -> int:
-    manifest = pd.read_csv(manifest_path)
-    if manifest.empty:
-        raise ValueError(f"{manifest_path} has no samples.")
-    if "channels" in manifest.columns:
-        channels = sorted({int(value) for value in manifest["channels"].dropna().tolist()})
-        if len(channels) == 1 and channels[0] > 0:
-            return channels[0]
-        raise ValueError(f"{manifest_path} must contain one positive channel count; found {channels}.")
-
-    sample_path = manifest_path.parent / str(manifest.iloc[0]["path"])
-    with np.load(sample_path) as npz:
-        image_complex = npz["image_complex"]
-        if image_complex.ndim != 3 or image_complex.shape[0] <= 0:
-            raise ValueError(f"{sample_path} image_complex must have shape (channels, height, width).")
-        return int(image_complex.shape[0])
-
-
 def run_epoch(
     model: nn.Module,
     loader,
@@ -284,9 +256,14 @@ def collect_epoch_outputs(
     desc: str,
     gradient_accumulation_steps: int = 1,
 ) -> tuple[float, np.ndarray, np.ndarray]:
+    if gradient_accumulation_steps < 1:
+        raise ValueError("gradient_accumulation_steps must be at least 1.")
     is_train = optimizer is not None
     model.train(is_train)
-    losses: list[float] = []
+    total_loss = 0.0
+    total_samples = 0
+    accumulated_samples = 0
+    accumulated_batches = 0
     all_targets: list[np.ndarray] = []
     all_scores: list[np.ndarray] = []
 
@@ -294,27 +271,45 @@ def collect_epoch_outputs(
         optimizer.zero_grad(set_to_none=True)
 
     with torch.set_grad_enabled(is_train):
-        for batch_index, (inputs, targets) in enumerate(tqdm(loader, desc=desc, leave=False)):
+        for inputs, targets in tqdm(loader, desc=desc, leave=False):
             inputs = inputs.to(device)
             targets = targets.to(device).float().flatten()
+            batch_samples = targets.numel()
             logits = model(inputs).flatten()
             loss = criterion(logits, targets)
             if is_train:
-                (loss / gradient_accumulation_steps).backward()
-                should_step = (
-                    (batch_index + 1) % gradient_accumulation_steps == 0
-                    or batch_index + 1 == len(loader)
-                )
-                if should_step:
-                    optimizer.step()
+                (loss * batch_samples).backward()
+                accumulated_samples += batch_samples
+                accumulated_batches += 1
+                if accumulated_batches == gradient_accumulation_steps:
+                    _step_optimizer(optimizer, model, accumulated_samples)
                     optimizer.zero_grad(set_to_none=True)
-            losses.append(float(loss.detach().cpu().item()))
+                    accumulated_samples = 0
+                    accumulated_batches = 0
+            total_loss += float(loss.detach().cpu().item()) * batch_samples
+            total_samples += batch_samples
             all_targets.append(targets.detach().cpu().numpy())
             all_scores.append(torch.sigmoid(logits).detach().cpu().numpy())
 
+    if is_train and accumulated_samples:
+        _step_optimizer(optimizer, model, accumulated_samples)
+        optimizer.zero_grad(set_to_none=True)
+    if total_samples == 0:
+        raise ValueError("Cannot run an epoch with an empty data loader.")
     y_true = np.concatenate(all_targets).astype(np.int32)
     y_score = np.concatenate(all_scores).astype(np.float32)
-    return float(np.mean(losses)), y_true, y_score
+    return total_loss / total_samples, y_true, y_score
+
+
+def _step_optimizer(
+    optimizer: torch.optim.Optimizer,
+    model: nn.Module,
+    accumulated_samples: int,
+) -> None:
+    for parameter in model.parameters():
+        if parameter.grad is not None:
+            parameter.grad.div_(accumulated_samples)
+    optimizer.step()
 
 
 def epoch_metrics(
