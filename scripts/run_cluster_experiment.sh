@@ -86,10 +86,8 @@ check_repository() {
     local branch
     branch="$(git -C "${REPO_ROOT}" branch --show-current)"
     [[ "${branch}" == "${EXPECTED_BRANCH}" ]] || die "Expected branch ${EXPECTED_BRANCH}; current branch is ${branch:-detached}."
-    if [[ "${ALLOW_DIRTY:-0}" != "1" ]]; then
-        git -C "${REPO_ROOT}" diff --quiet || die "Tracked files have unstaged changes."
-        git -C "${REPO_ROOT}" diff --cached --quiet || die "Tracked files have staged changes."
-    fi
+    git -C "${REPO_ROOT}" diff --quiet || die "Tracked files have unstaged changes."
+    git -C "${REPO_ROOT}" diff --cached --quiet || die "Tracked files have staged changes."
 }
 
 ensure_environment() {
@@ -194,14 +192,11 @@ print(f"Validated {len(frame)} samples; split counts: {split_counts}; channels: 
 PY
 }
 
-export_job_environment() {
-    export REPO_ROOT DATA_DIR MANIFEST VENV_DIR EXPERIMENT_NAME EXPERIMENT_ROOT PERSISTENT_RUNS_ROOT
-    export CLUSTER_REQUIREMENTS
-    export PARTITION CPUS MEMORY TIME_LIMIT MAX_PARALLEL
+export_worker_environment() {
+    export REPO_ROOT DATA_DIR MANIFEST VENV_DIR EXPERIMENT_ROOT CPUS
     export PILOT_SEED PHASE2_SEEDS PHASE2_SEED_BASE
     export EPOCHS BATCH_SIZE GRADIENT_ACCUMULATION_STEPS NUM_WORKERS PATIENCE
-    export LEARNING_RATE WEIGHT_DECAY PYTHON_BIN TORCH_INDEX_URL TORCH_VERSION
-    export USE_SYSTEM_TORCH STAGE_DATA SLURM_HINT PIP_CACHE_DIR EXPECTED_BRANCH
+    export LEARNING_RATE WEIGHT_DECAY STAGE_DATA
 }
 
 record_loaded_modules() {
@@ -271,7 +266,7 @@ submit_experiment() {
     validate_data
     mkdir -p "${EXPERIMENT_ROOT}/slurm" "${EXPERIMENT_ROOT}/phase1" "${EXPERIMENT_ROOT}/phase2"
     write_submission_metadata
-    export_job_environment
+    export_worker_environment
 
     local pilot_job array_job summary_job array_last array_spec submission_partial
     submission_partial="${EXPERIMENT_ROOT}/submission.partial"

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prost-t2-classification"
-dynamic = ["version"]
+version = "0.3.0"
 description = "Paired real-vs-complex classification from prepared four-coil prostate T2 NPZ data."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
@@ -21,9 +21,6 @@ dev = ["pytest>=8,<9"]
 
 [tool.setuptools]
 package-dir = { "" = "src" }
-
-[tool.setuptools.dynamic]
-version = { attr = "prost_t2_classification.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
