@@ -1,3 +1,3 @@
-"""T2-only fastMRI prostate classification package."""
+"""Paired real-vs-complex prostate T2 classification experiment."""
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

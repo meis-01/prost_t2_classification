@@ -8,6 +8,7 @@ from prost_t2_classification.train import (
     binary_metrics,
     collect_epoch_outputs,
     resolve_in_channels,
+    train_both_models,
     tune_threshold,
 )
 
@@ -93,3 +94,46 @@ def test_gradient_accumulation_steps_final_partial_group():
     assert not torch.equal(before, model.weight.detach())
     assert y_true.tolist() == [0, 1, 1]
     assert y_score.shape == (3,)
+
+
+def test_prepared_npz_experiment_runs_both_models(tmp_path):
+    samples = tmp_path / "samples"
+    samples.mkdir()
+    rows = [
+        (1, "training", 0),
+        (2, "training", 1),
+        (3, "validation", 0),
+        (4, "validation", 1),
+        (5, "test", 0),
+        (6, "test", 1),
+    ]
+    manifest_lines = ["path,fastmri_pt_id,label,data_split,channels"]
+    rng = np.random.default_rng(73191)
+    for patient, split, label in rows:
+        sample_name = f"patient_{patient}.npz"
+        image = (
+            rng.standard_normal((4, 32, 32))
+            + 1j * rng.standard_normal((4, 32, 32))
+        ).astype(np.complex64)
+        np.savez_compressed(samples / sample_name, image_complex=image)
+        manifest_lines.append(f"samples/{sample_name},{patient},{label},{split},4")
+
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text("\n".join(manifest_lines) + "\n", encoding="utf-8")
+    outputs = train_both_models(
+        manifest,
+        tmp_path / "runs",
+        epochs=1,
+        batch_size=2,
+        gradient_accumulation_steps=1,
+        patience=1,
+        seed=10383,
+        num_workers=0,
+        device="cpu",
+    )
+
+    assert set(outputs) == {"real", "complex"}
+    for run_dir in outputs.values():
+        assert (run_dir / "history.csv").is_file()
+        assert (run_dir / "threshold.json").is_file()
+        assert (run_dir / "test_metrics.json").is_file()

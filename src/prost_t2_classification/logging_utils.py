@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 
 LOGGER_NAME = "prost_t2"
@@ -17,7 +16,7 @@ def get_logger() -> logging.Logger:
     return logging.getLogger(LOGGER_NAME)
 
 
-def configure_logging(log_dir: Optional[Path] = None, *, level: int = logging.INFO) -> logging.Logger:
+def configure_logging(log_dir: Path | None = None, *, level: int = logging.INFO) -> logging.Logger:
     logger = get_logger()
     logger.setLevel(level)
     logger.handlers.clear()

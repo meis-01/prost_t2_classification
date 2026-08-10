@@ -8,8 +8,6 @@ from torch import nn
 from torch.nn import functional as F
 
 
-ComplexActivation = Literal["modrelu"]
-COMPLEX_ACTIVATIONS: tuple[ComplexActivation, ...] = ("modrelu",)
 COMPLEX_CHANNELS: tuple[int, int, int, int] = (32, 64, 128, 192)
 # sqrt(2) times the complex widths. A real convolution at these widths has
 # approximately the same number of scalar weights as a complex convolution.
@@ -17,14 +15,9 @@ PARAMETER_MATCHED_REAL_CHANNELS: tuple[int, int, int, int] = (45, 91, 181, 272)
 
 
 class RealAmplitudeCNN(nn.Module):
-    def __init__(
-        self,
-        in_channels: int = 4,
-        dropout: float = 0.2,
-        channels: tuple[int, int, int, int] = PARAMETER_MATCHED_REAL_CHANNELS,
-    ) -> None:
+    def __init__(self, in_channels: int = 4) -> None:
         super().__init__()
-        c1, c2, c3, c4 = channels
+        c1, c2, c3, c4 = PARAMETER_MATCHED_REAL_CHANNELS
         self.features = nn.Sequential(
             _real_block(in_channels, c1),
             nn.MaxPool2d(2),
@@ -37,7 +30,7 @@ class RealAmplitudeCNN(nn.Module):
         self.classifier = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
             nn.Flatten(),
-            nn.Dropout(dropout),
+            nn.Dropout(0.2),
             nn.Linear(c4, 1),
         )
 
@@ -162,7 +155,7 @@ class ComplexBlock(nn.Module):
 
 
 class ComplexT2CNN(nn.Module):
-    def __init__(self, in_channels: int = 4, dropout: float = 0.2) -> None:
+    def __init__(self, in_channels: int = 4) -> None:
         super().__init__()
         c1, c2, c3, c4 = COMPLEX_CHANNELS
         self.block1 = ComplexBlock(in_channels, c1)
@@ -172,7 +165,7 @@ class ComplexT2CNN(nn.Module):
         self.block3 = ComplexBlock(c2, c3)
         self.pool3 = ComplexMagnitudeMaxPool2d(2)
         self.block4 = ComplexBlock(c3, c4)
-        self.dropout = nn.Dropout(dropout)
+        self.dropout = nn.Dropout(0.2)
         self.classifier = nn.Linear(c4, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -188,14 +181,9 @@ def build_model(
     mode: Literal["real", "complex"],
     *,
     in_channels: int = 4,
-    dropout: float = 0.2,
-    real_channels: tuple[int, int, int, int] = PARAMETER_MATCHED_REAL_CHANNELS,
-    complex_activation: ComplexActivation = "modrelu",
 ) -> nn.Module:
-    if complex_activation != "modrelu":
-        raise ValueError(f"Unknown complex activation: {complex_activation}")
     if mode == "real":
-        return RealAmplitudeCNN(in_channels=in_channels, dropout=dropout, channels=real_channels)
+        return RealAmplitudeCNN(in_channels=in_channels)
     if mode == "complex":
-        return ComplexT2CNN(in_channels=in_channels, dropout=dropout)
+        return ComplexT2CNN(in_channels=in_channels)
     raise ValueError(f"Unknown model mode: {mode}")

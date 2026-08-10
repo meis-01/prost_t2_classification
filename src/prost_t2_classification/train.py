@@ -4,7 +4,7 @@ import json
 import random
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Tuple
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -15,12 +15,7 @@ from tqdm import tqdm
 
 from .dataset import make_dataloaders
 from .logging_utils import get_logger, timestamp_slug
-from .models import (
-    COMPLEX_ACTIVATIONS,
-    PARAMETER_MATCHED_REAL_CHANNELS,
-    ComplexActivation,
-    build_model,
-)
+from .models import build_model
 
 
 Mode = Literal["real", "complex"]
@@ -39,11 +34,8 @@ class TrainConfig:
     patience: int = 8
     seed: int = 10383
     num_workers: int = 0
-    in_channels: Optional[int] = None
-    dropout: float = 0.2
-    real_channels: Tuple[int, int, int, int] = PARAMETER_MATCHED_REAL_CHANNELS
-    complex_activation: ComplexActivation = "modrelu"
-    device: Optional[str] = None
+    in_channels: int | None = None
+    device: str | None = None
 
     def __post_init__(self) -> None:
         if self.epochs < 1:
@@ -58,35 +50,21 @@ class TrainConfig:
             raise ValueError("patience must be at least 1.")
         if self.in_channels is not None and self.in_channels < 1:
             raise ValueError("in_channels must be at least 1.")
-        if len(self.real_channels) != 4 or any(channel < 1 for channel in self.real_channels):
-            raise ValueError("real_channels must contain four positive channel counts.")
-        if self.complex_activation not in COMPLEX_ACTIVATIONS:
-            raise ValueError(
-                f"Unknown complex activation {self.complex_activation!r}; "
-                f"expected one of {', '.join(COMPLEX_ACTIVATIONS)}."
-            )
 
 
 def train_both_models(
     manifest: Path,
     runs_dir: Path,
-    *,
-    complex_activations: tuple[ComplexActivation, ...] = ("modrelu",),
     **kwargs,
-) -> Dict[str, Path]:
-    outputs: Dict[str, Path] = {}
-    outputs["real"] = train_model(TrainConfig(manifest=manifest, runs_dir=runs_dir, mode="real", **kwargs))
-    for activation in complex_activations:
-        config = TrainConfig(
-            manifest=manifest,
-            runs_dir=runs_dir,
-            mode="complex",
-            complex_activation=activation,
-            **kwargs,
-        )
-        key = "complex" if len(complex_activations) == 1 else f"complex_{activation}"
-        outputs[key] = train_model(config)
-    return outputs
+) -> dict[str, Path]:
+    return {
+        "real": train_model(
+            TrainConfig(manifest=manifest, runs_dir=runs_dir, mode="real", **kwargs)
+        ),
+        "complex": train_model(
+            TrainConfig(manifest=manifest, runs_dir=runs_dir, mode="complex", **kwargs)
+        ),
+    }
 
 
 def train_model(config: TrainConfig) -> Path:
@@ -112,13 +90,7 @@ def train_model(config: TrainConfig) -> Path:
         batch_size=config.batch_size,
         num_workers=config.num_workers,
     )
-    model = build_model(
-        config.mode,
-        in_channels=in_channels,
-        dropout=config.dropout,
-        real_channels=config.real_channels,
-        complex_activation=config.complex_activation,
-    ).to(device)
+    model = build_model(config.mode, in_channels=in_channels).to(device)
     criterion = nn.BCEWithLogitsLoss(
         pos_weight=torch.tensor([loaders.pos_weight], dtype=torch.float32, device=device)
     )
@@ -126,7 +98,7 @@ def train_model(config: TrainConfig) -> Path:
 
     best_score = -np.inf
     bad_epochs = 0
-    history: List[Dict[str, float]] = []
+    history: list[dict[str, float]] = []
     best_path = run_dir / f"best_{run_label}.pt"
     last_path = run_dir / f"last_{run_label}.pt"
 
@@ -246,7 +218,7 @@ def train_model(config: TrainConfig) -> Path:
 
 def run_label_from_config(config: TrainConfig) -> str:
     if config.mode == "complex":
-        return f"complex_{config.complex_activation}"
+        return "complex_modrelu"
     return config.mode
 
 
@@ -285,11 +257,11 @@ def run_epoch(
     criterion: nn.Module,
     *,
     device: torch.device,
-    optimizer: Optional[torch.optim.Optimizer],
+    optimizer: torch.optim.Optimizer | None,
     desc: str,
     threshold: float = 0.5,
     gradient_accumulation_steps: int = 1,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     loss, y_true, y_score = collect_epoch_outputs(
         model,
         loader,
@@ -308,15 +280,15 @@ def collect_epoch_outputs(
     criterion: nn.Module,
     *,
     device: torch.device,
-    optimizer: Optional[torch.optim.Optimizer],
+    optimizer: torch.optim.Optimizer | None,
     desc: str,
     gradient_accumulation_steps: int = 1,
-) -> Tuple[float, np.ndarray, np.ndarray]:
+) -> tuple[float, np.ndarray, np.ndarray]:
     is_train = optimizer is not None
     model.train(is_train)
-    losses: List[float] = []
-    all_targets: List[np.ndarray] = []
-    all_scores: List[np.ndarray] = []
+    losses: list[float] = []
+    all_targets: list[np.ndarray] = []
+    all_scores: list[np.ndarray] = []
 
     if is_train:
         optimizer.zero_grad(set_to_none=True)
@@ -351,7 +323,7 @@ def epoch_metrics(
     y_score: np.ndarray,
     *,
     threshold: float = 0.5,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     return {"loss": float(loss), **binary_metrics(y_true, y_score, threshold=threshold)}
 
 
@@ -385,7 +357,12 @@ def tune_threshold(y_true: np.ndarray, y_score: np.ndarray) -> float:
     return best_threshold
 
 
-def binary_metrics(y_true: np.ndarray, y_score: np.ndarray, *, threshold: float = 0.5) -> Dict[str, float]:
+def binary_metrics(
+    y_true: np.ndarray,
+    y_score: np.ndarray,
+    *,
+    threshold: float = 0.5,
+) -> dict[str, float]:
     y_pred = (y_score >= threshold).astype(np.int32)
     tn, fp, fn, tp = metrics.confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
     sensitivity = _safe_divide(tp, tp + fn)
@@ -431,7 +408,7 @@ def set_seed(seed: int) -> None:
     torch.backends.cudnn.benchmark = False
 
 
-def _serializable_config(config: TrainConfig) -> Dict[str, object]:
+def _serializable_config(config: TrainConfig) -> dict[str, object]:
     data = asdict(config)
     data["manifest"] = str(config.manifest)
     data["runs_dir"] = str(config.runs_dir)
@@ -441,13 +418,13 @@ def _serializable_config(config: TrainConfig) -> Dict[str, object]:
 def _checkpoint_payload(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
-    config: Dict[str, object],
+    config: dict[str, object],
     *,
     epoch: int,
     score: float,
     best_score: float,
     bad_epochs: int,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     return {
         "model_state": model.state_dict(),
         "optimizer_state": optimizer.state_dict(),
