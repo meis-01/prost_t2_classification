@@ -10,6 +10,10 @@ set -Eeuo pipefail
 # Run from anywhere inside the clone:
 #   bash scripts/run_cluster_experiment.sh
 #
+# On CECI, load one recent Python module first (Python 3.10-3.12):
+#   ml spider Python
+#   ml load <the selected Python module>
+#
 # Optional overrides, for example:
 #   PARTITION=general CPUS=20 MAX_PARALLEL=6 bash scripts/run_cluster_experiment.sh
 
@@ -21,7 +25,9 @@ DATA_DIR="${DATA_DIR:-${REPO_ROOT}/data}"
 MANIFEST="${MANIFEST:-${DATA_DIR}/manifest.csv}"
 VENV_DIR="${VENV_DIR:-${REPO_ROOT}/.venv}"
 EXPERIMENT_NAME="${EXPERIMENT_NAME:-maxpool_v1}"
-EXPERIMENT_ROOT="${EXPERIMENT_ROOT:-${REPO_ROOT}/runs/${EXPERIMENT_NAME}}"
+PERSISTENT_RUNS_ROOT="${PERSISTENT_RUNS_ROOT:-${GLOBALSCRATCH:-${REPO_ROOT}/runs}/prost_t2_experiments}"
+EXPERIMENT_ROOT="${EXPERIMENT_ROOT:-${PERSISTENT_RUNS_ROOT}/${EXPERIMENT_NAME}}"
+CLUSTER_REQUIREMENTS="${CLUSTER_REQUIREMENTS:-${REPO_ROOT}/requirements-cluster.txt}"
 
 PARTITION="${PARTITION:-work}"
 CPUS="${CPUS:-16}"
@@ -43,6 +49,11 @@ WEIGHT_DECAY="${WEIGHT_DECAY:-0.0001}"
 
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}"
+TORCH_VERSION="${TORCH_VERSION:-2.5.1}"
+USE_SYSTEM_TORCH="${USE_SYSTEM_TORCH:-auto}"
+STAGE_DATA="${STAGE_DATA:-1}"
+SLURM_HINT="${SLURM_HINT:-nomultithread}"
+PIP_CACHE_DIR="${PIP_CACHE_DIR:-${GLOBALSCRATCH:-${HOME}}/.cache/pip-prost-t2}"
 EXPECTED_BRANCH="${EXPECTED_BRANCH:-exp}"
 
 die() {
@@ -66,6 +77,8 @@ check_configuration() {
     require_positive_integer PATIENCE "${PATIENCE}"
     [[ "${NUM_WORKERS}" =~ ^[0-9]+$ ]] || die "NUM_WORKERS must be a non-negative integer."
     (( NUM_WORKERS < CPUS )) || die "NUM_WORKERS must be smaller than CPUS."
+    [[ "${USE_SYSTEM_TORCH}" =~ ^(auto|0|1)$ ]] || die "USE_SYSTEM_TORCH must be auto, 0, or 1."
+    [[ "${STAGE_DATA}" =~ ^[01]$ ]] || die "STAGE_DATA must be 0 or 1."
 }
 
 check_repository() {
@@ -81,14 +94,71 @@ check_repository() {
 
 ensure_environment() {
     command -v "${PYTHON_BIN}" >/dev/null 2>&1 || die "${PYTHON_BIN} is not available. Set PYTHON_BIN to a cluster Python 3 executable."
+    [[ -f "${CLUSTER_REQUIREMENTS}" ]] || die "Missing ${CLUSTER_REQUIREMENTS}."
+    "${PYTHON_BIN}" - <<'PY'
+import sys
+
+if not ((3, 10) <= sys.version_info[:2] <= (3, 12)):
+    raise SystemExit(
+        f"Python {sys.version.split()[0]} is unsupported by the pinned CPU environment; "
+        "load a CECI Python 3.10, 3.11, or 3.12 module first"
+    )
+PY
+
+    local system_torch=0 environment_mode
+    if "${PYTHON_BIN}" - <<'PY' >/dev/null 2>&1
+import torch
+
+version = tuple(int(part) for part in torch.__version__.split("+", 1)[0].split(".")[:2])
+is_compatible_cpu_build = version >= (2, 2) and torch.version.cuda is None
+raise SystemExit(0 if is_compatible_cpu_build else 1)
+PY
+    then
+        system_torch=1
+    fi
+    if [[ "${USE_SYSTEM_TORCH}" == "1" && "${system_torch}" != "1" ]]; then
+        die "USE_SYSTEM_TORCH=1, but the loaded Python module has no CPU-only PyTorch >=2.2."
+    fi
+
     if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
-        "${PYTHON_BIN}" -m venv "${VENV_DIR}"
-        "${VENV_DIR}/bin/python" -m pip install --upgrade pip
-        "${VENV_DIR}/bin/python" -m pip install torch --index-url "${TORCH_INDEX_URL}"
-        "${VENV_DIR}/bin/python" -m pip install numpy pandas scikit-learn tqdm
+        if [[ "${USE_SYSTEM_TORCH}" != "0" && "${system_torch}" == "1" ]]; then
+            "${PYTHON_BIN}" -m venv --system-site-packages "${VENV_DIR}"
+            environment_mode="system-torch"
+        else
+            "${PYTHON_BIN}" -m venv "${VENV_DIR}"
+            environment_mode="pinned-cpu-torch"
+        fi
+        printf '%s\n' "${environment_mode}" > "${VENV_DIR}/prost_t2_environment_mode"
+    fi
+
+    environment_mode="$(cat "${VENV_DIR}/prost_t2_environment_mode" 2>/dev/null || printf 'existing-venv')"
+    export PIP_CACHE_DIR PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_INPUT=1
+    mkdir -p "${PIP_CACHE_DIR}"
+    "${VENV_DIR}/bin/python" -m pip install \
+        'pip==24.3.1' 'setuptools==75.6.0' 'wheel==0.45.1'
+    "${VENV_DIR}/bin/python" -m pip install --requirement "${CLUSTER_REQUIREMENTS}"
+    if [[ "${environment_mode}" != "system-torch" ]]; then
+        "${VENV_DIR}/bin/python" -m pip install \
+            "torch==${TORCH_VERSION}" --index-url "${TORCH_INDEX_URL}"
     fi
     "${VENV_DIR}/bin/python" -m pip install --no-deps --editable "${REPO_ROOT}"
-    "${VENV_DIR}/bin/python" -c 'import numpy, pandas, sklearn, torch, tqdm, prost_t2_classification'
+    "${VENV_DIR}/bin/python" - <<'PY'
+import platform
+
+import numpy
+import pandas
+import sklearn
+import torch
+import tqdm
+import prost_t2_classification
+
+if torch.cuda.is_available():
+    raise SystemExit("This CPU experiment unexpectedly resolved a CUDA device")
+print(
+    f"Environment ready: Python {platform.python_version()}, PyTorch {torch.__version__}, "
+    f"NumPy {numpy.__version__}, CPU-only"
+)
+PY
 }
 
 validate_data() {
@@ -121,11 +191,39 @@ PY
 }
 
 export_job_environment() {
-    export REPO_ROOT DATA_DIR MANIFEST VENV_DIR EXPERIMENT_NAME EXPERIMENT_ROOT
+    export REPO_ROOT DATA_DIR MANIFEST VENV_DIR EXPERIMENT_NAME EXPERIMENT_ROOT PERSISTENT_RUNS_ROOT
+    export CLUSTER_REQUIREMENTS
     export PARTITION CPUS MEMORY TIME_LIMIT MAX_PARALLEL
     export PILOT_SEED PHASE2_SEEDS PHASE2_SEED_BASE
     export EPOCHS BATCH_SIZE GRADIENT_ACCUMULATION_STEPS NUM_WORKERS PATIENCE
-    export LEARNING_RATE WEIGHT_DECAY PYTHON_BIN TORCH_INDEX_URL EXPECTED_BRANCH
+    export LEARNING_RATE WEIGHT_DECAY PYTHON_BIN TORCH_INDEX_URL TORCH_VERSION
+    export USE_SYSTEM_TORCH STAGE_DATA SLURM_HINT PIP_CACHE_DIR EXPECTED_BRANCH
+}
+
+record_loaded_modules() {
+    if command -v module >/dev/null 2>&1; then
+        module -t list 2>&1 || true
+    elif [[ -n "${LOADEDMODULES:-}" ]]; then
+        tr ':' '\n' <<< "${LOADEDMODULES}"
+    else
+        printf '%s\n' "No environment modules detected"
+    fi
+}
+
+check_host() {
+    check_configuration
+    check_repository
+    ensure_environment
+    validate_data
+    printf '\nHost check passed.\n'
+    printf 'Host: %s\n' "$(hostname)"
+    printf 'Python: %s\n' "$("${VENV_DIR}/bin/python" --version 2>&1)"
+    printf 'Experiment root: %s\n' "${EXPERIMENT_ROOT}"
+    printf 'Partition: %s; CPUs/job: %s; memory/job: %s\n' "${PARTITION}" "${CPUS}" "${MEMORY}"
+    printf 'Stage NPZ data to job-local scratch: %s\n' "${STAGE_DATA}"
+    printf 'Loaded modules:\n'
+    record_loaded_modules
+    command -v sbatch >/dev/null 2>&1 || die "Environment is valid, but sbatch is unavailable on this host."
 }
 
 write_submission_metadata() {
@@ -134,6 +232,11 @@ write_submission_metadata() {
     {
         printf 'git_commit=%s\n' "${commit}"
         printf 'manifest=%s\n' "${MANIFEST}"
+        printf 'experiment_root=%s\n' "${EXPERIMENT_ROOT}"
+        printf 'python_bin=%s\n' "$(command -v "${PYTHON_BIN}")"
+        printf 'environment_mode=%s\n' "$(cat "${VENV_DIR}/prost_t2_environment_mode" 2>/dev/null || printf 'existing-venv')"
+        printf 'torch_version_request=%s\n' "${TORCH_VERSION}"
+        printf 'stage_data=%s\n' "${STAGE_DATA}"
         printf 'partition=%s\n' "${PARTITION}"
         printf 'cpus=%s\n' "${CPUS}"
         printf 'memory=%s\n' "${MEMORY}"
@@ -150,6 +253,7 @@ write_submission_metadata() {
         printf 'weight_decay=%s\n' "${WEIGHT_DECAY}"
     } > "${EXPERIMENT_ROOT}/configuration.txt"
     "${VENV_DIR}/bin/python" -m pip freeze > "${EXPERIMENT_ROOT}/environment.txt"
+    record_loaded_modules > "${EXPERIMENT_ROOT}/modules.txt"
 }
 
 submit_experiment() {
@@ -168,9 +272,12 @@ submit_experiment() {
     pilot_job="$(sbatch --parsable \
         --job-name=prost-pilot \
         --partition="${PARTITION}" \
+        --nodes=1 \
+        --ntasks=1 \
         --cpus-per-task="${CPUS}" \
         --mem="${MEMORY}" \
         --time="${TIME_LIMIT}" \
+        --hint="${SLURM_HINT}" \
         --chdir="${REPO_ROOT}" \
         --output="${EXPERIMENT_ROOT}/slurm/phase1_%j.out" \
         --error="${EXPERIMENT_ROOT}/slurm/phase1_%j.err" \
@@ -183,9 +290,12 @@ submit_experiment() {
     array_job="$(sbatch --parsable \
         --job-name=prost-seeds \
         --partition="${PARTITION}" \
+        --nodes=1 \
+        --ntasks=1 \
         --cpus-per-task="${CPUS}" \
         --mem="${MEMORY}" \
         --time="${TIME_LIMIT}" \
+        --hint="${SLURM_HINT}" \
         --array="${array_spec}" \
         --dependency="afterok:${pilot_job}" \
         --chdir="${REPO_ROOT}" \
@@ -198,6 +308,8 @@ submit_experiment() {
     summary_job="$(sbatch --parsable \
         --job-name=prost-summary \
         --partition="${PARTITION}" \
+        --nodes=1 \
+        --ntasks=1 \
         --cpus-per-task=1 \
         --mem=4G \
         --time=00:30:00 \
@@ -220,9 +332,25 @@ submit_experiment() {
     printf 'Results will be written under: %s\n' "${EXPERIMENT_ROOT}"
 }
 
+stage_worker_data() {
+    if [[ "${STAGE_DATA}" == "0" ]]; then
+        printf '%s\n' "${MANIFEST}"
+        return
+    fi
+
+    local scratch_root="${LOCALSCRATCH:-${TMPDIR:-}}"
+    [[ -n "${scratch_root}" && -d "${scratch_root}" ]] || \
+        die "STAGE_DATA=1, but neither LOCALSCRATCH nor TMPDIR points to a directory."
+    local staged_data="${scratch_root}/prost_t2_data_${SLURM_JOB_ID}"
+    mkdir -p "${staged_data}"
+    cp -a "${DATA_DIR}/." "${staged_data}/"
+    [[ -f "${staged_data}/manifest.csv" ]] || die "Data staging did not produce manifest.csv."
+    printf '%s\n' "${staged_data}/manifest.csv"
+}
+
 run_worker() {
     local phase="${1:?worker phase is required}"
-    local seed task_index job_token run_dir torch_threads exit_status
+    local seed task_index job_token run_dir torch_threads exit_status worker_manifest
     [[ -n "${SLURM_JOB_ID:-}" ]] || die "The worker must run inside a Slurm allocation."
     [[ -x "${VENV_DIR}/bin/python" ]] || die "Missing experiment environment at ${VENV_DIR}."
 
@@ -260,21 +388,42 @@ run_worker() {
     export MKL_NUM_THREADS="${torch_threads}"
     export OPENBLAS_NUM_THREADS="${torch_threads}"
     export NUMEXPR_NUM_THREADS="${torch_threads}"
+    export OMP_DYNAMIC=FALSE
+    export OMP_PROC_BIND=close
+    export OMP_PLACES=cores
+    export MALLOC_ARENA_MAX=4
     export PYTHONUNBUFFERED=1
+
+    worker_manifest="$(stage_worker_data)"
 
     {
         printf 'phase=%s\n' "${phase}"
         printf 'seed=%s\n' "${seed}"
         printf 'slurm_job_id=%s\n' "${SLURM_JOB_ID}"
         printf 'hostname=%s\n' "$(hostname)"
+        printf 'source_manifest=%s\n' "${MANIFEST}"
+        printf 'worker_manifest=%s\n' "${worker_manifest}"
+        printf 'python=%s\n' "${VENV_DIR}/bin/python"
+        printf 'omp_num_threads=%s\n' "${OMP_NUM_THREADS}"
         printf 'git_commit=%s\n' "$(git -C "${REPO_ROOT}" rev-parse HEAD)"
         printf 'started_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     } > "${run_dir}/run_info.txt"
+    uname -a > "${run_dir}/host.txt"
+    command -v lscpu >/dev/null 2>&1 && lscpu >> "${run_dir}/host.txt"
+    record_loaded_modules > "${run_dir}/modules.txt"
+    "${VENV_DIR}/bin/python" - <<'PY' > "${run_dir}/torch_runtime.txt"
+import torch
+
+print(f"torch={torch.__version__}")
+print(f"num_threads={torch.get_num_threads()}")
+print(f"num_interop_threads={torch.get_num_interop_threads()}")
+print(torch.__config__.show())
+PY
 
     "${VENV_DIR}/bin/python" -m prost_t2_classification \
         --log-dir "${run_dir}/logs" \
         train \
-        --manifest "${MANIFEST}" \
+        --manifest "${worker_manifest}" \
         --runs-dir "${run_dir}" \
         --mode both \
         --device cpu \
@@ -401,6 +550,9 @@ case "${1:-submit}" in
     submit)
         submit_experiment
         ;;
+    check)
+        check_host
+        ;;
     __worker)
         shift
         check_configuration
@@ -411,6 +563,6 @@ case "${1:-submit}" in
         summarize_phase2 "$@"
         ;;
     *)
-        die "Usage: bash scripts/run_cluster_experiment.sh [submit]"
+        die "Usage: bash scripts/run_cluster_experiment.sh [check|submit]"
         ;;
 esac
