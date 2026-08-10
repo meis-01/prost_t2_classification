@@ -119,16 +119,30 @@ class ModReLU(nn.Module):
         return x * scale
 
 
-class ComplexAvgPool2d(nn.Module):
-    def __init__(self, kernel_size: int) -> None:
+class ComplexMagnitudeMaxPool2d(nn.Module):
+    """Select the full complex value with maximum amplitude per pooling window."""
+
+    def __init__(self, kernel_size: int, stride: int | None = None) -> None:
         super().__init__()
         self.kernel_size = kernel_size
+        self.stride = kernel_size if stride is None else stride
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.complex(
-            F.avg_pool2d(x.real, self.kernel_size),
-            F.avg_pool2d(x.imag, self.kernel_size),
+        if not torch.is_complex(x):
+            raise TypeError("ComplexMagnitudeMaxPool2d expects a complex tensor")
+
+        amplitude_squared = x.real.square() + x.imag.square()
+        _, indices = F.max_pool2d(
+            amplitude_squared,
+            self.kernel_size,
+            stride=self.stride,
+            return_indices=True,
         )
+        output_shape = indices.shape
+        flat_indices = indices.flatten(start_dim=2)
+        pooled_real = torch.gather(x.real.flatten(start_dim=2), 2, flat_indices).reshape(output_shape)
+        pooled_imag = torch.gather(x.imag.flatten(start_dim=2), 2, flat_indices).reshape(output_shape)
+        return torch.complex(pooled_real, pooled_imag)
 
 
 class ComplexBlock(nn.Module):
@@ -152,11 +166,11 @@ class ComplexT2CNN(nn.Module):
         super().__init__()
         c1, c2, c3, c4 = COMPLEX_CHANNELS
         self.block1 = ComplexBlock(in_channels, c1)
-        self.pool1 = ComplexAvgPool2d(2)
+        self.pool1 = ComplexMagnitudeMaxPool2d(2)
         self.block2 = ComplexBlock(c1, c2)
-        self.pool2 = ComplexAvgPool2d(2)
+        self.pool2 = ComplexMagnitudeMaxPool2d(2)
         self.block3 = ComplexBlock(c2, c3)
-        self.pool3 = ComplexAvgPool2d(2)
+        self.pool3 = ComplexMagnitudeMaxPool2d(2)
         self.block4 = ComplexBlock(c3, c4)
         self.dropout = nn.Dropout(dropout)
         self.classifier = nn.Linear(c4, 1)
