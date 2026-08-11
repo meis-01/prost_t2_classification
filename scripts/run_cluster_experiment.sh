@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# One-command CPU/Slurm experiment.
+# One-command paired real-vs-complex-median CPU/Slurm experiment.
 #
 # Expected repository layout after cloning branch "exp":
 #   data/manifest.csv
@@ -24,7 +24,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DATA_DIR="${DATA_DIR:-${REPO_ROOT}/data}"
 MANIFEST="${MANIFEST:-${DATA_DIR}/manifest.csv}"
 VENV_DIR="${VENV_DIR:-${REPO_ROOT}/.venv}"
-EXPERIMENT_NAME="${EXPERIMENT_NAME:-maxpool_v1}"
+EXPERIMENT_NAME="${EXPERIMENT_NAME:-median_vs_real_v1}"
 PERSISTENT_RUNS_ROOT="${PERSISTENT_RUNS_ROOT:-${GLOBALSCRATCH:-${REPO_ROOT}/runs}/prost_t2_experiments}"
 EXPERIMENT_ROOT="${EXPERIMENT_ROOT:-${PERSISTENT_RUNS_ROOT}/${EXPERIMENT_NAME}}"
 CLUSTER_REQUIREMENTS="${CLUSTER_REQUIREMENTS:-${REPO_ROOT}/requirements-cluster.txt}"
@@ -55,6 +55,8 @@ STAGE_DATA="${STAGE_DATA:-1}"
 SLURM_HINT="${SLURM_HINT:-nomultithread}"
 PIP_CACHE_DIR="${PIP_CACHE_DIR:-${GLOBALSCRATCH:-${HOME}}/.cache/pip-prost-t2}"
 EXPECTED_BRANCH="${EXPECTED_BRANCH:-exp}"
+COMPLEX_POOLING="median"
+PRIMARY_ENDPOINT="test_auc"
 
 die() {
     printf 'ERROR: %s\n' "$*" >&2
@@ -196,7 +198,7 @@ export_worker_environment() {
     export REPO_ROOT DATA_DIR MANIFEST VENV_DIR EXPERIMENT_ROOT CPUS
     export PILOT_SEED PHASE2_SEEDS PHASE2_SEED_BASE
     export EPOCHS BATCH_SIZE GRADIENT_ACCUMULATION_STEPS NUM_WORKERS PATIENCE
-    export LEARNING_RATE WEIGHT_DECAY STAGE_DATA
+    export LEARNING_RATE WEIGHT_DECAY STAGE_DATA COMPLEX_POOLING PRIMARY_ENDPOINT
 }
 
 record_loaded_modules() {
@@ -243,6 +245,13 @@ write_submission_metadata() {
         printf 'pilot_seed=%s\n' "${PILOT_SEED}"
         printf 'phase2_seeds=%s\n' "${PHASE2_SEEDS}"
         printf 'phase2_seed_base=%s\n' "${PHASE2_SEED_BASE}"
+        printf 'phase2_seed_first=%s\n' "$((PHASE2_SEED_BASE + 1))"
+        printf 'phase2_seed_last=%s\n' "$((PHASE2_SEED_BASE + PHASE2_SEEDS))"
+        printf 'pilot_in_confirmatory_analysis=0\n'
+        printf 'models=real,complex_median\n'
+        printf 'complex_pooling=%s\n' "${COMPLEX_POOLING}"
+        printf 'primary_endpoint=%s\n' "${PRIMARY_ENDPOINT}"
+        printf 'secondary_endpoints=test_average_precision,test_balanced_accuracy,test_sensitivity,test_specificity\n'
         printf 'epochs=%s\n' "${EPOCHS}"
         printf 'batch_size=%s\n' "${BATCH_SIZE}"
         printf 'gradient_accumulation_steps=%s\n' "${GRADIENT_ACCUMULATION_STEPS}"
@@ -271,7 +280,7 @@ submit_experiment() {
     local pilot_job array_job summary_job array_last array_spec submission_partial
     submission_partial="${EXPERIMENT_ROOT}/submission.partial"
     pilot_job="$(sbatch --parsable \
-        --job-name=prost-pilot \
+        --job-name=prost-med-pilot \
         --partition="${PARTITION}" \
         --nodes=1 \
         --ntasks=1 \
@@ -290,7 +299,7 @@ submit_experiment() {
     array_last=$((PHASE2_SEEDS - 1))
     array_spec="0-${array_last}%${MAX_PARALLEL}"
     array_job="$(sbatch --parsable \
-        --job-name=prost-seeds \
+        --job-name=prost-med-seeds \
         --partition="${PARTITION}" \
         --nodes=1 \
         --ntasks=1 \
@@ -309,7 +318,7 @@ submit_experiment() {
     printf 'phase2_array_job=%s\n' "${array_job}" | tee -a "${submission_partial}"
 
     summary_job="$(sbatch --parsable \
-        --job-name=prost-summary \
+        --job-name=prost-med-summary \
         --partition="${PARTITION}" \
         --nodes=1 \
         --ntasks=1 \
@@ -406,6 +415,8 @@ run_worker() {
         printf 'python=%s\n' "${VENV_DIR}/bin/python"
         printf 'omp_num_threads=%s\n' "${OMP_NUM_THREADS}"
         printf 'git_commit=%s\n' "$(git -C "${REPO_ROOT}" rev-parse HEAD)"
+        printf 'model_pair=real,complex_median\n'
+        printf 'complex_pooling=%s\n' "${COMPLEX_POOLING}"
         printf 'started_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     } > "${run_dir}/run_info.txt"
     uname -a > "${run_dir}/host.txt"
@@ -434,7 +445,8 @@ PY
         --patience "${PATIENCE}" \
         --lr "${LEARNING_RATE}" \
         --weight-decay "${WEIGHT_DECAY}" \
-        --seed "${seed}"
+        --seed "${seed}" \
+        --complex-pooling "${COMPLEX_POOLING}"
 
     "${VENV_DIR}/bin/python" - "${run_dir}" <<'PY'
 from pathlib import Path
@@ -442,10 +454,11 @@ import sys
 
 root = Path(sys.argv[1])
 real = list(root.glob("*_real/test_metrics.json"))
-complex_runs = list(root.glob("*_complex_modrelu/test_metrics.json"))
+complex_runs = list(root.glob("*_complex_modrelu_median_pool/test_metrics.json"))
 if len(real) != 1 or len(complex_runs) != 1:
     raise SystemExit(
-        f"Expected one completed real and complex run; found real={len(real)}, complex={len(complex_runs)}"
+        "Expected one completed real and complex-median run; "
+        f"found real={len(real)}, complex_median={len(complex_runs)}"
     )
 PY
     printf 'completed_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${run_dir}/run_info.txt"
@@ -453,96 +466,11 @@ PY
 
 summarize_phase2() {
     local array_job="${1:?phase2 array job id is required}"
-    "${VENV_DIR}/bin/python" - "${EXPERIMENT_ROOT}" "${array_job}" "${PHASE2_SEEDS}" "${PHASE2_SEED_BASE}" <<'PY'
-from __future__ import annotations
-
-import json
-from pathlib import Path
-import sys
-
-import numpy as np
-import pandas as pd
-
-root = Path(sys.argv[1])
-array_job = sys.argv[2]
-count = int(sys.argv[3])
-seed_base = int(sys.argv[4])
-records: list[dict[str, object]] = []
-
-for index in range(count):
-    seed = seed_base + index + 1
-    job_dir = root / "phase2" / f"seed_{seed}" / f"job_{array_job}_{index}"
-    if not (job_dir / "COMPLETE").is_file():
-        raise SystemExit(f"Missing completion marker: {job_dir / 'COMPLETE'}")
-    model_patterns = {"real": "*_real", "complex": "*_complex_modrelu"}
-    for model, pattern in model_patterns.items():
-        run_dirs = [path for path in job_dir.glob(pattern) if path.is_dir()]
-        if len(run_dirs) != 1:
-            raise SystemExit(f"Expected one {model} run in {job_dir}; found {len(run_dirs)}")
-        run_dir = run_dirs[0]
-        test = json.loads((run_dir / "test_metrics.json").read_text())
-        threshold = json.loads((run_dir / "threshold.json").read_text())
-        history = pd.read_csv(run_dir / "history.csv")
-        best_row = history.loc[history["val_auc"].idxmax()]
-        records.append(
-            {
-                "seed": seed,
-                "model": model,
-                "epochs_completed": len(history),
-                "best_epoch": int(best_row["epoch"]) + 1,
-                "best_val_auc": float(best_row["val_auc"]),
-                "val_balanced_accuracy": float(
-                    threshold["validation_at_threshold"]["balanced_accuracy"]
-                ),
-                **{f"test_{key}": float(value) for key, value in test.items()},
-                "run_dir": str(run_dir),
-            }
-        )
-
-metrics = pd.DataFrame(records).sort_values(["seed", "model"])
-metrics.to_csv(root / "metrics_by_seed.csv", index=False)
-
-value_columns = [
-    "best_val_auc",
-    "val_balanced_accuracy",
-    "test_auc",
-    "test_average_precision",
-    "test_balanced_accuracy",
-    "test_sensitivity",
-    "test_specificity",
-]
-available = [column for column in value_columns if column in metrics.columns]
-model_summary = metrics.groupby("model")[available].agg(["mean", "std"])
-model_summary.columns = [f"{metric}_{stat}" for metric, stat in model_summary.columns]
-model_summary.reset_index().to_csv(root / "summary_by_model.csv", index=False)
-
-wide = metrics.pivot(index="seed", columns="model", values=available)
-deltas = pd.DataFrame(index=wide.index)
-for metric in available:
-    deltas[f"{metric}_complex_minus_real"] = wide[(metric, "complex")] - wide[(metric, "real")]
-deltas.reset_index().to_csv(root / "paired_deltas.csv", index=False)
-
-rng = np.random.default_rng(73191)
-paired_summary = []
-for column in deltas.columns:
-    values = deltas[column].to_numpy(dtype=float)
-    bootstrap = rng.choice(values, size=(10000, len(values)), replace=True).mean(axis=1)
-    paired_summary.append(
-        {
-            "metric": column.removesuffix("_complex_minus_real"),
-            "n_pairs": len(values),
-            "mean_complex_minus_real": values.mean(),
-            "std_complex_minus_real": values.std(ddof=1),
-            "ci95_low": np.quantile(bootstrap, 0.025),
-            "ci95_high": np.quantile(bootstrap, 0.975),
-            "complex_wins": int((values > 0).sum()),
-            "ties": int((values == 0).sum()),
-            "real_wins": int((values < 0).sum()),
-        }
-    )
-pd.DataFrame(paired_summary).to_csv(root / "paired_summary.csv", index=False)
-print(f"Wrote phase-two summaries for {count} paired seeds to {root}")
-PY
+    "${VENV_DIR}/bin/python" -m prost_t2_classification.experiment_summary \
+        --experiment-root "${EXPERIMENT_ROOT}" \
+        --array-job "${array_job}" \
+        --count "${PHASE2_SEEDS}" \
+        --seed-base "${PHASE2_SEED_BASE}"
     touch "${EXPERIMENT_ROOT}/PHASE2_COMPLETE"
 }
 

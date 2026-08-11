@@ -7,6 +7,7 @@ from prost_t2_classification.train import (
     _checkpoint_payload,
     binary_metrics,
     collect_epoch_outputs,
+    run_label_from_config,
     train_both_models,
     tune_threshold,
 )
@@ -54,6 +55,25 @@ def test_checkpoint_payload_includes_optimizer_state():
     assert payload["best_score"] == pytest.approx(0.8)
     assert payload["bad_epochs"] == 1
     assert "state" in payload["optimizer_state"]
+
+
+@pytest.mark.parametrize(
+    ("pooling", "expected"),
+    [
+        ("max", "complex_modrelu"),
+        ("median", "complex_modrelu_median_pool"),
+        ("average", "complex_modrelu_average_pool"),
+    ],
+)
+def test_complex_pooling_has_distinct_run_label(tmp_path, pooling, expected):
+    config = TrainConfig(
+        manifest=tmp_path / "manifest.csv",
+        runs_dir=tmp_path / "runs",
+        mode="complex",
+        complex_pooling=pooling,
+    )
+
+    assert run_label_from_config(config) == expected
 
 
 def test_gradient_accumulation_steps_final_partial_group():
@@ -151,9 +171,12 @@ def test_prepared_npz_experiment_runs_both_models(tmp_path):
         seed=10383,
         num_workers=0,
         device="cpu",
+        complex_pooling="median",
     )
 
     assert set(outputs) == {"real", "complex"}
+    assert outputs["real"].name.endswith("_real")
+    assert outputs["complex"].name.endswith("_complex_modrelu_median_pool")
     for run_dir in outputs.values():
         assert (run_dir / "history.csv").is_file()
         assert (run_dir / "threshold.json").is_file()

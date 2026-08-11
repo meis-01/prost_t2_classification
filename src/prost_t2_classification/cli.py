@@ -27,6 +27,12 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--seed", type=int, default=10383)
     train_parser.add_argument("--num-workers", type=int, default=0)
     train_parser.add_argument("--device", default=None)
+    train_parser.add_argument(
+        "--complex-pooling",
+        choices=("max", "median", "average"),
+        default="max",
+        help="Intermediate pooling used by the complex model.",
+    )
     train_parser.set_defaults(func=cmd_train)
     return parser
 
@@ -54,6 +60,7 @@ def cmd_train(args: argparse.Namespace) -> int:
         "seed": args.seed,
         "num_workers": args.num_workers,
         "device": args.device,
+        "complex_pooling": args.complex_pooling,
     }
     if args.mode == "both":
         train_both_models(args.manifest, args.runs_dir, **common)

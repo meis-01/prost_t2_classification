@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 from .dataset import make_dataloaders
 from .logging_utils import get_logger, timestamp_slug
-from .models import build_model
+from .models import ComplexPooling, build_model
 
 
 Mode = Literal["real", "complex"]
@@ -35,6 +35,7 @@ class TrainConfig:
     seed: int = 10383
     num_workers: int = 0
     device: str | None = None
+    complex_pooling: ComplexPooling = "max"
 
     def __post_init__(self) -> None:
         if self.epochs < 1:
@@ -53,6 +54,8 @@ class TrainConfig:
             raise ValueError("num_workers must be non-negative.")
         if self.mode not in ("real", "complex"):
             raise ValueError(f"Unknown model mode: {self.mode}")
+        if self.complex_pooling not in ("max", "median", "average"):
+            raise ValueError(f"Unknown complex pooling mode: {self.complex_pooling}")
 
 
 def train_both_models(
@@ -92,7 +95,7 @@ def train_model(config: TrainConfig) -> Path:
         num_workers=config.num_workers,
         seed=config.seed,
     )
-    model = build_model(config.mode).to(device)
+    model = build_model(config.mode, complex_pooling=config.complex_pooling).to(device)
     criterion = nn.BCEWithLogitsLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
 
@@ -219,7 +222,9 @@ def train_model(config: TrainConfig) -> Path:
 
 def run_label_from_config(config: TrainConfig) -> str:
     if config.mode == "complex":
-        return "complex_modrelu"
+        if config.complex_pooling == "max":
+            return "complex_modrelu"
+        return f"complex_modrelu_{config.complex_pooling}_pool"
     return config.mode
 
 
