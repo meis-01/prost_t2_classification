@@ -16,11 +16,24 @@ def test_prepare_experiment_rejects_configuration_drift(tmp_path):
         _prepare_experiment(root, {"epochs": 3}, {"python": "test"}, {"samples": 6})
 
 
-def test_summarize_experiment_writes_paired_tables(tmp_path):
+@pytest.mark.parametrize(
+    ("pooling", "complex_suffix"),
+    [
+        (None, "complex_modrelu"),
+        ("median", "complex_modrelu_median_pool"),
+        ("average", "complex_modrelu_average_pool"),
+    ],
+)
+def test_summarize_experiment_writes_paired_tables(
+    tmp_path, pooling, complex_suffix
+):
     root = tmp_path / "experiment"
     root.mkdir()
+    configuration = {"phase2_seeds": 2, "phase2_seed_base": 100}
+    if pooling is not None:
+        configuration["complex_pooling"] = pooling
     (root / "configuration.json").write_text(
-        json.dumps({"phase2_seeds": 2, "phase2_seed_base": 100}),
+        json.dumps(configuration),
         encoding="utf-8",
     )
 
@@ -30,7 +43,7 @@ def test_summarize_experiment_writes_paired_tables(tmp_path):
         (attempt / "COMPLETE").touch()
         for model, suffix, offset in (
             ("real", "real", 0.0),
-            ("complex", "complex_modrelu", 0.1),
+            ("complex", complex_suffix, 0.1),
         ):
             run_dir = attempt / f"run_{suffix}"
             run_dir.mkdir()

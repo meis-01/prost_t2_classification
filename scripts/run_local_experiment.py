@@ -70,6 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
     run = subparsers.add_parser("run", help="Run or resume the local paired experiment.")
     _add_location_arguments(run, include_experiment=True)
     run.add_argument("--device", default="auto", help="auto, cpu, cuda, cuda:N, or mps")
+    run.add_argument(
+        "--complex-pooling",
+        choices=("max", "median", "average"),
+        default="max",
+    )
     run.add_argument("--expected-branch", default="exp_local")
     run.add_argument("--pilot-seed", type=int, default=DEFAULT_PILOT_SEED)
     run.add_argument("--phase2-seeds", type=_positive_int, default=DEFAULT_PHASE2_SEEDS)
@@ -281,6 +286,7 @@ def _configuration(args: argparse.Namespace, device: str) -> dict[str, Any]:
     return {
         "manifest": str(args.manifest.resolve()),
         "device": device,
+        "complex_pooling": args.complex_pooling,
         "pilot_seed": args.pilot_seed,
         "phase2_seeds": args.phase2_seeds,
         "phase2_seed_base": args.phase2_seed_base,
@@ -326,6 +332,12 @@ def _completed_attempts(seed_root: Path) -> list[Path]:
     return sorted(path.parent for path in seed_root.glob("attempt_*/COMPLETE"))
 
 
+def _complex_run_pattern(pooling: str) -> str:
+    if pooling == "max":
+        return "*_complex_modrelu"
+    return f"*_complex_modrelu_{pooling}_pool"
+
+
 def _run_seed(
     *,
     phase: str,
@@ -357,6 +369,8 @@ def _run_seed(
         str(attempt),
         "--mode",
         "both",
+        "--complex-pooling",
+        configuration["complex_pooling"],
         "--device",
         configuration["device"],
         "--epochs",
@@ -434,7 +448,8 @@ def _run_seed(
         )
 
     real_runs = [path for path in attempt.glob("*_real") if path.is_dir()]
-    complex_runs = [path for path in attempt.glob("*_complex_modrelu") if path.is_dir()]
+    complex_pattern = _complex_run_pattern(configuration["complex_pooling"])
+    complex_runs = [path for path in attempt.glob(complex_pattern) if path.is_dir()]
     if len(real_runs) != 1 or len(complex_runs) != 1:
         (attempt / "FAILED").write_text("invalid outputs", encoding="utf-8")
         raise RuntimeError(
@@ -505,7 +520,9 @@ def summarize_experiment(root: Path) -> dict[str, Path]:
     for index in range(count):
         seed = seed_base + index + 1
         attempt = _only_completed_attempt(root / "phase2" / f"seed_{seed}")
-        model_patterns = {"real": "*_real", "complex": "*_complex_modrelu"}
+        pooling = configuration.get("complex_pooling", "max")
+        complex_suffix = _complex_run_pattern(pooling)
+        model_patterns = {"real": "*_real", "complex": complex_suffix}
         for model, pattern in model_patterns.items():
             run_dirs = [path for path in attempt.glob(pattern) if path.is_dir()]
             if len(run_dirs) != 1:

@@ -8,6 +8,9 @@ from torch import nn
 from torch.nn import functional as F
 
 
+ComplexPooling = Literal["max", "median", "average"]
+
+
 COMPLEX_CHANNELS: tuple[int, int, int, int] = (32, 64, 128, 192)
 # sqrt(2) times the complex widths. A real convolution at these widths has
 # approximately the same number of scalar weights as a complex convolution.
@@ -138,6 +141,82 @@ class ComplexMagnitudeMaxPool2d(nn.Module):
         return torch.complex(pooled_real, pooled_imag)
 
 
+class ComplexMagnitudeMedianPool2d(nn.Module):
+    """Select the full complex value with median-ranked amplitude per window.
+
+    For even-sized windows, ``torch.median`` selects the lower of the two
+    central amplitudes. Selecting an observed value, rather than averaging the
+    two central values, retains that activation's original complex phase.
+    """
+
+    def __init__(self, kernel_size: int, stride: int | None = None) -> None:
+        super().__init__()
+        self.kernel_size = kernel_size
+        self.stride = kernel_size if stride is None else stride
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not torch.is_complex(x):
+            raise TypeError("ComplexMagnitudeMedianPool2d expects a complex tensor")
+
+        real_patches = F.unfold(
+            x.real,
+            kernel_size=self.kernel_size,
+            stride=self.stride,
+        )
+        imag_patches = F.unfold(
+            x.imag,
+            kernel_size=self.kernel_size,
+            stride=self.stride,
+        )
+        batch, channels, height, width = x.shape
+        window_elements = self.kernel_size**2
+        locations = real_patches.shape[-1]
+        real_patches = real_patches.reshape(
+            batch, channels, window_elements, locations
+        ).transpose(2, 3)
+        imag_patches = imag_patches.reshape(
+            batch, channels, window_elements, locations
+        ).transpose(2, 3)
+        amplitude_squared = real_patches.square() + imag_patches.square()
+        median_indices = amplitude_squared.median(dim=-1).indices.unsqueeze(-1)
+        pooled_real = torch.gather(real_patches, -1, median_indices).squeeze(-1)
+        pooled_imag = torch.gather(imag_patches, -1, median_indices).squeeze(-1)
+        output_height = (height - self.kernel_size) // self.stride + 1
+        output_width = (width - self.kernel_size) // self.stride + 1
+        output_shape = (batch, channels, output_height, output_width)
+        return torch.complex(
+            pooled_real.reshape(output_shape),
+            pooled_imag.reshape(output_shape),
+        )
+
+
+class ComplexAveragePool2d(nn.Module):
+    """Average real and imaginary components over each pooling window."""
+
+    def __init__(self, kernel_size: int, stride: int | None = None) -> None:
+        super().__init__()
+        self.kernel_size = kernel_size
+        self.stride = kernel_size if stride is None else stride
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not torch.is_complex(x):
+            raise TypeError("ComplexAveragePool2d expects a complex tensor")
+        return torch.complex(
+            F.avg_pool2d(x.real, self.kernel_size, stride=self.stride),
+            F.avg_pool2d(x.imag, self.kernel_size, stride=self.stride),
+        )
+
+
+def build_complex_pool(pooling: ComplexPooling) -> nn.Module:
+    if pooling == "max":
+        return ComplexMagnitudeMaxPool2d(2)
+    if pooling == "median":
+        return ComplexMagnitudeMedianPool2d(2)
+    if pooling == "average":
+        return ComplexAveragePool2d(2)
+    raise ValueError(f"Unknown complex pooling mode: {pooling}")
+
+
 class ComplexBlock(nn.Module):
     def __init__(self, in_channels: int, out_channels: int) -> None:
         super().__init__()
@@ -155,15 +234,15 @@ class ComplexBlock(nn.Module):
 
 
 class ComplexT2CNN(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, *, pooling: ComplexPooling = "max") -> None:
         super().__init__()
         c1, c2, c3, c4 = COMPLEX_CHANNELS
         self.block1 = ComplexBlock(4, c1)
-        self.pool1 = ComplexMagnitudeMaxPool2d(2)
+        self.pool1 = build_complex_pool(pooling)
         self.block2 = ComplexBlock(c1, c2)
-        self.pool2 = ComplexMagnitudeMaxPool2d(2)
+        self.pool2 = build_complex_pool(pooling)
         self.block3 = ComplexBlock(c2, c3)
-        self.pool3 = ComplexMagnitudeMaxPool2d(2)
+        self.pool3 = build_complex_pool(pooling)
         self.block4 = ComplexBlock(c3, c4)
         self.dropout = nn.Dropout(0.2)
         self.classifier = nn.Linear(c4, 1)
@@ -177,9 +256,13 @@ class ComplexT2CNN(nn.Module):
         return self.classifier(self.dropout(pooled)).squeeze(-1)
 
 
-def build_model(mode: Literal["real", "complex"]) -> nn.Module:
+def build_model(
+    mode: Literal["real", "complex"],
+    *,
+    complex_pooling: ComplexPooling = "max",
+) -> nn.Module:
     if mode == "real":
         return RealAmplitudeCNN()
     if mode == "complex":
-        return ComplexT2CNN()
+        return ComplexT2CNN(pooling=complex_pooling)
     raise ValueError(f"Unknown model mode: {mode}")

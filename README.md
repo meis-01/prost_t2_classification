@@ -76,6 +76,12 @@ Useful tuning options include `--epochs`, `--batch-size`,
 `--gradient-accumulation-steps`, `--threads`, `--num-workers`, and `--device`.
 Run `python scripts/run_local_experiment.py run --help` for the complete list.
 
+The complex model supports three intermediate pooling modes: `max` (default),
+`median` (select the full complex activation with median-ranked amplitude), and
+`average` (average real and imaginary components). Select one with
+`--complex-pooling max|median|average`. Each non-default mode receives a distinct
+run-directory suffix so results cannot be mixed accidentally.
+
 ## Resume and results
 
 Re-run the exact same command after an interruption. Completed seeds are

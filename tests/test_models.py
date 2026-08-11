@@ -3,7 +3,9 @@ import pytest
 
 from prost_t2_classification.models import (
     COMPLEX_CHANNELS,
+    ComplexAveragePool2d,
     ComplexMagnitudeMaxPool2d,
+    ComplexMagnitudeMedianPool2d,
     ModReLU,
     PARAMETER_MATCHED_REAL_CHANNELS,
     build_model,
@@ -53,6 +55,57 @@ def test_complex_magnitude_max_pool_is_phase_equivariant():
     rotated_output = pool(x * rotation)
 
     assert torch.allclose(rotated_output, output * rotation, atol=1e-6, rtol=1e-6)
+
+
+def test_complex_magnitude_median_pool_retains_median_ranked_value():
+    pool = ComplexMagnitudeMedianPool2d(2)
+    x = torch.tensor(
+        [[[[1 + 0j, 4 + 0j], [2 + 0j, 3 + 0j]]]],
+        dtype=torch.complex64,
+    )
+
+    output = pool(x)
+
+    assert output.shape == (1, 1, 1, 1)
+    assert output.item() == pytest.approx(2 + 0j)
+
+
+def test_complex_average_pool_averages_full_complex_values():
+    pool = ComplexAveragePool2d(2)
+    x = torch.tensor(
+        [[[[1 + 1j, 2 + 2j], [3 + 3j, 4 + 4j]]]],
+        dtype=torch.complex64,
+    )
+
+    output = pool(x)
+
+    assert output.shape == (1, 1, 1, 1)
+    assert output.item() == pytest.approx(2.5 + 2.5j)
+
+
+@pytest.mark.parametrize(
+    "pool",
+    [ComplexMagnitudeMedianPool2d(2), ComplexAveragePool2d(2)],
+)
+def test_additional_complex_pools_are_phase_equivariant(pool):
+    x = torch.complex(torch.randn(2, 3, 8, 8), torch.randn(2, 3, 8, 8))
+    rotation = torch.polar(torch.tensor(1.0), torch.tensor(0.731))
+
+    output = pool(x)
+    rotated_output = pool(x * rotation)
+
+    assert torch.allclose(rotated_output, output * rotation, atol=1e-6, rtol=1e-6)
+
+
+@pytest.mark.parametrize("pooling", ["max", "median", "average"])
+def test_complex_model_builds_with_each_pooling_mode(pooling):
+    model = build_model("complex", complex_pooling=pooling)
+
+    assert model.pool1.__class__ in {
+        ComplexMagnitudeMaxPool2d,
+        ComplexMagnitudeMedianPool2d,
+        ComplexAveragePool2d,
+    }
 
 
 def test_real_model_matches_complex_scalar_parameter_budget():
