@@ -18,7 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--manifest", type=Path, required=True)
     train_parser.add_argument("--runs-dir", type=Path, required=True)
     train_parser.add_argument("--mode", choices=("real", "complex", "both"), default="both")
-    train_parser.add_argument("--epochs", type=int, default=20)
+    train_parser.add_argument("--epochs", type=int, default=100)
     train_parser.add_argument("--batch-size", type=int, default=8)
     train_parser.add_argument("--gradient-accumulation-steps", type=int, default=4)
     train_parser.add_argument("--lr", type=float, default=1e-3)

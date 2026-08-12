@@ -17,3 +17,18 @@ def test_train_cli_accepts_median_complex_pooling(tmp_path):
     )
 
     assert args.complex_pooling == "median"
+
+
+def test_train_cli_defaults_to_one_hundred_epochs(tmp_path):
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "train",
+            "--manifest",
+            str(tmp_path / "manifest.csv"),
+            "--runs-dir",
+            str(tmp_path / "runs"),
+        ]
+    )
+
+    assert args.epochs == 100

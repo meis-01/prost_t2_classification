@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# One-command paired real-vs-complex-median CPU/Slurm experiment.
+# One-command paired real-vs-complex-pooling CPU/Slurm experiment.
 #
 # Expected repository layout after cloning branch "exp":
 #   data/manifest.csv
@@ -24,7 +24,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DATA_DIR="${DATA_DIR:-${REPO_ROOT}/data}"
 MANIFEST="${MANIFEST:-${DATA_DIR}/manifest.csv}"
 VENV_DIR="${VENV_DIR:-${REPO_ROOT}/.venv}"
-EXPERIMENT_NAME="${EXPERIMENT_NAME:-median_vs_real_v1}"
+EXPERIMENT_NAME="${EXPERIMENT_NAME:-pooling_vs_real_v1}"
 PERSISTENT_RUNS_ROOT="${PERSISTENT_RUNS_ROOT:-${GLOBALSCRATCH:-${REPO_ROOT}/runs}/prost_t2_experiments}"
 EXPERIMENT_ROOT="${EXPERIMENT_ROOT:-${PERSISTENT_RUNS_ROOT}/${EXPERIMENT_NAME}}"
 CLUSTER_REQUIREMENTS="${CLUSTER_REQUIREMENTS:-${REPO_ROOT}/requirements-cluster.txt}"
@@ -32,14 +32,14 @@ CLUSTER_REQUIREMENTS="${CLUSTER_REQUIREMENTS:-${REPO_ROOT}/requirements-cluster.
 PARTITION="${PARTITION:-work}"
 CPUS="${CPUS:-16}"
 MEMORY="${MEMORY:-32G}"
-TIME_LIMIT="${TIME_LIMIT:-24:00:00}"
+TIME_LIMIT="${TIME_LIMIT:-48:00:00}"
 MAX_PARALLEL="${MAX_PARALLEL:-8}"
 
 PILOT_SEED="${PILOT_SEED:-10383}"
 PHASE2_SEEDS="${PHASE2_SEEDS:-20}"
 PHASE2_SEED_BASE="${PHASE2_SEED_BASE:-24000}"
 
-EPOCHS="${EPOCHS:-20}"
+EPOCHS="${EPOCHS:-100}"
 BATCH_SIZE="${BATCH_SIZE:-8}"
 GRADIENT_ACCUMULATION_STEPS="${GRADIENT_ACCUMULATION_STEPS:-4}"
 NUM_WORKERS="${NUM_WORKERS:-2}"
@@ -55,8 +55,11 @@ STAGE_DATA="${STAGE_DATA:-1}"
 SLURM_HINT="${SLURM_HINT:-nomultithread}"
 PIP_CACHE_DIR="${PIP_CACHE_DIR:-${GLOBALSCRATCH:-${HOME}}/.cache/pip-prost-t2}"
 EXPECTED_BRANCH="${EXPECTED_BRANCH:-exp}"
-COMPLEX_POOLING="median"
+COMPLEX_POOLINGS="max median average"
+MODELS="real complex_max complex_median complex_average"
+MODEL_COUNT=4
 PRIMARY_ENDPOINT="test_auc"
+PRIMARY_COMPARISON="complex_median_minus_real"
 
 die() {
     printf 'ERROR: %s\n' "$*" >&2
@@ -198,7 +201,9 @@ export_worker_environment() {
     export REPO_ROOT DATA_DIR MANIFEST VENV_DIR EXPERIMENT_ROOT CPUS
     export PILOT_SEED PHASE2_SEEDS PHASE2_SEED_BASE
     export EPOCHS BATCH_SIZE GRADIENT_ACCUMULATION_STEPS NUM_WORKERS PATIENCE
-    export LEARNING_RATE WEIGHT_DECAY STAGE_DATA COMPLEX_POOLING PRIMARY_ENDPOINT
+    export LEARNING_RATE WEIGHT_DECAY STAGE_DATA COMPLEX_POOLINGS MODELS MODEL_COUNT
+    export PRIMARY_ENDPOINT
+    export PRIMARY_COMPARISON
 }
 
 record_loaded_modules() {
@@ -248,9 +253,10 @@ write_submission_metadata() {
         printf 'phase2_seed_first=%s\n' "$((PHASE2_SEED_BASE + 1))"
         printf 'phase2_seed_last=%s\n' "$((PHASE2_SEED_BASE + PHASE2_SEEDS))"
         printf 'pilot_in_confirmatory_analysis=0\n'
-        printf 'models=real,complex_median\n'
-        printf 'complex_pooling=%s\n' "${COMPLEX_POOLING}"
+        printf 'models=%s\n' "${MODELS// /,}"
+        printf 'complex_poolings=%s\n' "${COMPLEX_POOLINGS// /,}"
         printf 'primary_endpoint=%s\n' "${PRIMARY_ENDPOINT}"
+        printf 'primary_comparison=%s\n' "${PRIMARY_COMPARISON}"
         printf 'secondary_endpoints=test_average_precision,test_balanced_accuracy,test_sensitivity,test_specificity\n'
         printf 'epochs=%s\n' "${EPOCHS}"
         printf 'batch_size=%s\n' "${BATCH_SIZE}"
@@ -277,8 +283,9 @@ submit_experiment() {
     write_submission_metadata
     export_worker_environment
 
-    local pilot_job array_job summary_job array_last array_spec submission_partial
+    local pilot_job array_job summary_job pilot_spec array_last array_spec submission_partial
     submission_partial="${EXPERIMENT_ROOT}/submission.partial"
+    pilot_spec="0-$((MODEL_COUNT - 1))%${MODEL_COUNT}"
     pilot_job="$(sbatch --parsable \
         --job-name=prost-med-pilot \
         --partition="${PARTITION}" \
@@ -288,15 +295,16 @@ submit_experiment() {
         --mem="${MEMORY}" \
         --time="${TIME_LIMIT}" \
         --hint="${SLURM_HINT}" \
+        --array="${pilot_spec}" \
         --chdir="${REPO_ROOT}" \
-        --output="${EXPERIMENT_ROOT}/slurm/phase1_%j.out" \
-        --error="${EXPERIMENT_ROOT}/slurm/phase1_%j.err" \
+        --output="${EXPERIMENT_ROOT}/slurm/phase1_%A_%a.out" \
+        --error="${EXPERIMENT_ROOT}/slurm/phase1_%A_%a.err" \
         --export=ALL \
         "${SCRIPT_PATH}" __worker phase1)"
     pilot_job="${pilot_job%%;*}"
     printf 'phase1_job=%s\n' "${pilot_job}" | tee "${submission_partial}"
 
-    array_last=$((PHASE2_SEEDS - 1))
+    array_last=$((PHASE2_SEEDS * MODEL_COUNT - 1))
     array_spec="0-${array_last}%${MAX_PARALLEL}"
     array_job="$(sbatch --parsable \
         --job-name=prost-med-seeds \
@@ -336,7 +344,8 @@ submit_experiment() {
     mv -- "${submission_partial}" "${EXPERIMENT_ROOT}/submission.txt"
     cat "${EXPERIMENT_ROOT}/submission.txt"
 
-    printf '\nPhase two contains %s paired seeds and starts only if phase one succeeds.\n' "${PHASE2_SEEDS}"
+    printf '\nPhase two contains %s paired seeds x %s model tasks and starts only if all pilot models succeed.\n' \
+        "${PHASE2_SEEDS}" "${MODEL_COUNT}"
     printf 'Monitor with: squeue -j %s,%s,%s\n' "${pilot_job}" "${array_job}" "${summary_job}"
     printf 'Results will be written under: %s\n' "${EXPERIMENT_ROOT}"
 }
@@ -359,35 +368,52 @@ stage_worker_data() {
 
 run_worker() {
     local phase="${1:?worker phase is required}"
-    local seed task_index job_token run_dir torch_threads exit_status worker_manifest
+    local seed task_index seed_index model_index model_key mode pooling completion_marker failure_marker
+    local job_token run_dir torch_threads exit_status worker_manifest
     [[ -n "${SLURM_JOB_ID:-}" ]] || die "The worker must run inside a Slurm allocation."
     [[ -x "${VENV_DIR}/bin/python" ]] || die "Missing experiment environment at ${VENV_DIR}."
 
     case "${phase}" in
         phase1)
             seed="${PILOT_SEED}"
-            job_token="${SLURM_JOB_ID}"
+            task_index="${SLURM_ARRAY_TASK_ID:?phase1 requires a Slurm array task id}"
+            seed_index=0
+            model_index="${task_index}"
+            job_token="${SLURM_ARRAY_JOB_ID}_0"
             ;;
         phase2)
             task_index="${SLURM_ARRAY_TASK_ID:?phase2 requires a Slurm array task id}"
-            seed=$((PHASE2_SEED_BASE + task_index + 1))
-            job_token="${SLURM_ARRAY_JOB_ID}_${task_index}"
+            seed_index=$((task_index / MODEL_COUNT))
+            model_index=$((task_index % MODEL_COUNT))
+            seed=$((PHASE2_SEED_BASE + seed_index + 1))
+            job_token="${SLURM_ARRAY_JOB_ID}_${seed_index}"
             ;;
         *)
             die "Unknown worker phase: ${phase}"
             ;;
     esac
 
+    case "${model_index}" in
+        0) model_key="real"; mode="real"; pooling="none" ;;
+        1) model_key="complex_max"; mode="complex"; pooling="max" ;;
+        2) model_key="complex_median"; mode="complex"; pooling="median" ;;
+        3) model_key="complex_average"; mode="complex"; pooling="average" ;;
+        *) die "Unknown model index: ${model_index}" ;;
+    esac
+    completion_marker="${model_key^^}_COMPLETE"
+    failure_marker="${model_key^^}_FAILED"
+
     run_dir="${EXPERIMENT_ROOT}/${phase}/seed_${seed}/job_${job_token}"
-    mkdir -p "${run_dir}/logs"
-    [[ ! -e "${run_dir}/COMPLETE" ]] || die "Refusing to overwrite completed run ${run_dir}."
+    mkdir -p "${run_dir}/logs/${model_key}"
+    [[ ! -e "${run_dir}/${completion_marker}" ]] || \
+        die "Refusing to overwrite completed ${model_key} run in ${run_dir}."
 
     worker_exit() {
         exit_status=$?
         if (( exit_status == 0 )); then
-            touch "${run_dir}/COMPLETE"
+            touch "${run_dir}/${completion_marker}"
         else
-            printf '%s\n' "${exit_status}" > "${run_dir}/FAILED"
+            printf '%s\n' "${exit_status}" > "${run_dir}/${failure_marker}"
         fi
     }
     trap worker_exit EXIT
@@ -415,14 +441,18 @@ run_worker() {
         printf 'python=%s\n' "${VENV_DIR}/bin/python"
         printf 'omp_num_threads=%s\n' "${OMP_NUM_THREADS}"
         printf 'git_commit=%s\n' "$(git -C "${REPO_ROOT}" rev-parse HEAD)"
-        printf 'model_pair=real,complex_median\n'
-        printf 'complex_pooling=%s\n' "${COMPLEX_POOLING}"
+        printf 'model=%s\n' "${model_key}"
+        printf 'mode=%s\n' "${mode}"
+        printf 'pooling=%s\n' "${pooling}"
+        printf 'models=%s\n' "${MODELS// /,}"
+        printf 'complex_poolings=%s\n' "${COMPLEX_POOLINGS// /,}"
+        printf 'primary_comparison=%s\n' "${PRIMARY_COMPARISON}"
         printf 'started_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    } > "${run_dir}/run_info.txt"
-    uname -a > "${run_dir}/host.txt"
-    command -v lscpu >/dev/null 2>&1 && lscpu >> "${run_dir}/host.txt"
-    record_loaded_modules > "${run_dir}/modules.txt"
-    "${VENV_DIR}/bin/python" - <<'PY' > "${run_dir}/torch_runtime.txt"
+    } > "${run_dir}/run_info_${model_key}.txt"
+    uname -a > "${run_dir}/host_${model_key}.txt"
+    command -v lscpu >/dev/null 2>&1 && lscpu >> "${run_dir}/host_${model_key}.txt"
+    record_loaded_modules > "${run_dir}/modules_${model_key}.txt"
+    "${VENV_DIR}/bin/python" - <<'PY' > "${run_dir}/torch_runtime_${model_key}.txt"
 import torch
 
 print(f"torch={torch.__version__}")
@@ -431,37 +461,49 @@ print(f"num_interop_threads={torch.get_num_interop_threads()}")
 print(torch.__config__.show())
 PY
 
-    "${VENV_DIR}/bin/python" -m prost_t2_classification \
-        --log-dir "${run_dir}/logs" \
-        train \
-        --manifest "${worker_manifest}" \
-        --runs-dir "${run_dir}" \
-        --mode both \
-        --device cpu \
-        --epochs "${EPOCHS}" \
-        --batch-size "${BATCH_SIZE}" \
-        --gradient-accumulation-steps "${GRADIENT_ACCUMULATION_STEPS}" \
-        --num-workers "${NUM_WORKERS}" \
-        --patience "${PATIENCE}" \
-        --lr "${LEARNING_RATE}" \
-        --weight-decay "${WEIGHT_DECAY}" \
-        --seed "${seed}" \
-        --complex-pooling "${COMPLEX_POOLING}"
+    local -a train_args
+    train_args=(
+        --log-dir "${run_dir}/logs/${model_key}"
+        train
+        --manifest "${worker_manifest}"
+        --runs-dir "${run_dir}"
+        --device cpu
+        --epochs "${EPOCHS}"
+        --batch-size "${BATCH_SIZE}"
+        --gradient-accumulation-steps "${GRADIENT_ACCUMULATION_STEPS}"
+        --num-workers "${NUM_WORKERS}"
+        --patience "${PATIENCE}"
+        --lr "${LEARNING_RATE}"
+        --weight-decay "${WEIGHT_DECAY}"
+        --seed "${seed}"
+    )
 
-    "${VENV_DIR}/bin/python" - "${run_dir}" <<'PY'
+    if [[ "${mode}" == "real" ]]; then
+        "${VENV_DIR}/bin/python" -m prost_t2_classification \
+            "${train_args[@]}" --mode real
+    else
+        "${VENV_DIR}/bin/python" -m prost_t2_classification \
+            "${train_args[@]}" --mode complex --complex-pooling "${pooling}"
+    fi
+
+    "${VENV_DIR}/bin/python" - "${run_dir}" "${model_key}" <<'PY'
 from pathlib import Path
 import sys
 
 root = Path(sys.argv[1])
-real = list(root.glob("*_real/test_metrics.json"))
-complex_runs = list(root.glob("*_complex_modrelu_median_pool/test_metrics.json"))
-if len(real) != 1 or len(complex_runs) != 1:
-    raise SystemExit(
-        "Expected one completed real and complex-median run; "
-        f"found real={len(real)}, complex_median={len(complex_runs)}"
-    )
+model = sys.argv[2]
+patterns = {
+    "real": "*_real/test_metrics.json",
+    "complex_max": "*_complex_modrelu/test_metrics.json",
+    "complex_median": "*_complex_modrelu_median_pool/test_metrics.json",
+    "complex_average": "*_complex_modrelu_average_pool/test_metrics.json",
+}
+count = len(list(root.glob(patterns[model])))
+if count != 1:
+    raise SystemExit(f"Expected one completed {model} run; found {count}")
 PY
-    printf 'completed_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${run_dir}/run_info.txt"
+    printf 'completed_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> \
+        "${run_dir}/run_info_${model_key}.txt"
 }
 
 summarize_phase2() {

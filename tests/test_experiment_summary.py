@@ -10,12 +10,12 @@ from prost_t2_classification.experiment_summary import (
 )
 
 
-def _write_run(run_dir, *, mode, seed, auc):
+def _write_run(run_dir, *, mode, seed, auc, pooling="none"):
     run_dir.mkdir()
     config = {
         "mode": mode,
         "seed": seed,
-        "complex_pooling": "median",
+        "complex_pooling": pooling,
     }
     (run_dir / "config.json").write_text(json.dumps(config), encoding="utf-8")
     pd.DataFrame(
@@ -49,7 +49,7 @@ def test_default_twenty_seed_sign_flip_test_is_exact():
     assert pvalue == pytest.approx(2 / 2**20)
 
 
-def test_summarize_phase2_writes_explicit_paired_median_results(tmp_path):
+def test_summarize_phase2_writes_all_pooling_comparisons(tmp_path):
     array_job = "9876"
     seed_base = 24000
     real_aucs = [0.60, 0.65, 0.70]
@@ -62,13 +62,34 @@ def test_summarize_phase2_writes_explicit_paired_median_results(tmp_path):
             / f"job_{array_job}_{index}"
         )
         job_dir.mkdir(parents=True)
-        (job_dir / "COMPLETE").touch()
+        for marker in (
+            "REAL_COMPLETE",
+            "COMPLEX_MAX_COMPLETE",
+            "COMPLEX_MEDIAN_COMPLETE",
+            "COMPLEX_AVERAGE_COMPLETE",
+        ):
+            (job_dir / marker).touch()
         _write_run(job_dir / "20260811_real", mode="real", seed=seed, auc=real_auc)
+        _write_run(
+            job_dir / "20260811_complex_modrelu",
+            mode="complex",
+            seed=seed,
+            auc=real_auc + 0.05,
+            pooling="max",
+        )
         _write_run(
             job_dir / "20260811_complex_modrelu_median_pool",
             mode="complex",
             seed=seed,
             auc=real_auc + 0.10,
+            pooling="median",
+        )
+        _write_run(
+            job_dir / "20260811_complex_modrelu_average_pool",
+            mode="complex",
+            seed=seed,
+            auc=real_auc + 0.02,
+            pooling="average",
         )
 
     summarize_phase2(
@@ -79,19 +100,33 @@ def test_summarize_phase2_writes_explicit_paired_median_results(tmp_path):
     )
 
     metrics = pd.read_csv(tmp_path / "metrics_by_seed.csv")
-    assert set(metrics["model"]) == {"real", "complex_median"}
-    assert set(metrics["pooling"]) == {"none", "median"}
+    assert set(metrics["model"]) == {
+        "real",
+        "complex_max",
+        "complex_median",
+        "complex_average",
+    }
+    assert set(metrics["pooling"]) == {"none", "max", "median", "average"}
 
     deltas = pd.read_csv(tmp_path / "paired_deltas.csv")
     assert deltas["test_auc_complex_median_minus_real"].tolist() == pytest.approx(
         [0.10, 0.10, 0.10]
     )
+    assert deltas["test_auc_complex_max_minus_real"].tolist() == pytest.approx(
+        [0.05, 0.05, 0.05]
+    )
+    assert deltas["test_auc_complex_average_minus_real"].tolist() == pytest.approx(
+        [0.02, 0.02, 0.02]
+    )
 
     summary = pd.read_csv(tmp_path / "paired_summary.csv")
-    primary = summary.loc[summary["metric"] == "test_auc"].iloc[0]
+    primary = summary.loc[
+        (summary["comparison"] == "complex_median_minus_real")
+        & (summary["metric"] == "test_auc")
+    ].iloc[0]
     assert bool(primary["is_primary_endpoint"])
-    assert primary["mean_complex_median_minus_real"] == pytest.approx(0.10)
-    assert primary["complex_median_wins"] == 3
+    assert primary["mean_difference"] == pytest.approx(0.10)
+    assert primary["complex_wins"] == 3
     assert primary["real_wins"] == 0
     assert primary["paired_sign_flip_p_value"] == pytest.approx(0.25)
     assert primary["sign_flip_method"] == "exact"
@@ -99,5 +134,10 @@ def test_summarize_phase2_writes_explicit_paired_median_results(tmp_path):
 
     metadata = json.loads((tmp_path / "summary_metadata.json").read_text())
     assert metadata["primary_endpoint"] == "test_auc"
+    assert metadata["primary_comparison"] == "complex_median_minus_real"
+    assert metadata["exploratory_comparisons"] == [
+        "complex_max_minus_real",
+        "complex_average_minus_real",
+    ]
     assert metadata["pilot_in_confirmatory_analysis"] is False
     assert metadata["confirmatory_seeds"] == [24001, 24002, 24003]

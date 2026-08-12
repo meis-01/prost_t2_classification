@@ -26,7 +26,7 @@ class TrainConfig:
     manifest: Path
     runs_dir: Path
     mode: Mode
-    epochs: int = 20
+    epochs: int = 100
     batch_size: int = 8
     gradient_accumulation_steps: int = 4
     lr: float = 1e-3
