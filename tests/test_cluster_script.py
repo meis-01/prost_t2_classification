@@ -17,6 +17,12 @@ def test_cluster_workflow_runs_real_and_all_complex_pooling_variants():
     assert '"${train_args[@]}" --mode real' in script
     assert '"${train_args[@]}" --mode complex --complex-pooling "${pooling}"' in script
     assert 'completion_marker="${model_key^^}_COMPLETE"' in script
+    assert 'trap "worker_exit ${run_dir_q} ${completion_marker_q} ${failure_marker_q}" EXIT' in script
+    assert 'local worker_run_dir="${1:?worker run directory is required}"' in script
+    assert "resume-phase2)" in script
+    assert 'validate_completed_pilots' in script
+    assert 'phase2_resume.txt' in script
+    assert 'submit_phase2_jobs "" "${recovery_partial}"' in script
     assert '*_complex_modrelu/test_metrics.json' in script
     assert '*_complex_modrelu_median_pool/test_metrics.json' in script
     assert '*_complex_modrelu_average_pool/test_metrics.json' in script

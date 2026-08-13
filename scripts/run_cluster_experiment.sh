@@ -283,7 +283,7 @@ submit_experiment() {
     write_submission_metadata
     export_worker_environment
 
-    local pilot_job array_job summary_job pilot_spec array_last array_spec submission_partial
+    local pilot_job array_job summary_job pilot_spec submission_partial
     submission_partial="${EXPERIMENT_ROOT}/submission.partial"
     pilot_spec="0-$((MODEL_COUNT - 1))%${MODEL_COUNT}"
     pilot_job="$(sbatch --parsable \
@@ -304,6 +304,30 @@ submit_experiment() {
     pilot_job="${pilot_job%%;*}"
     printf 'phase1_job=%s\n' "${pilot_job}" | tee "${submission_partial}"
 
+    submit_phase2_jobs "${pilot_job}" "${submission_partial}"
+    array_job="${SUBMITTED_PHASE2_ARRAY_JOB}"
+    summary_job="${SUBMITTED_SUMMARY_JOB}"
+    mv -- "${submission_partial}" "${EXPERIMENT_ROOT}/submission.txt"
+    cat "${EXPERIMENT_ROOT}/submission.txt"
+
+    printf '\nPhase two contains %s paired seeds x %s model tasks and starts only if all pilot models succeed.\n' \
+        "${PHASE2_SEEDS}" "${MODEL_COUNT}"
+    printf 'Monitor with: squeue -j %s,%s,%s\n' "${pilot_job}" "${array_job}" "${summary_job}"
+    printf 'Results will be written under: %s\n' "${EXPERIMENT_ROOT}"
+}
+
+SUBMITTED_PHASE2_ARRAY_JOB=""
+SUBMITTED_SUMMARY_JOB=""
+
+submit_phase2_jobs() {
+    local dependency_job="${1:-}"
+    local submission_file="${2:?submission metadata file is required}"
+    local array_job summary_job array_last array_spec
+    local -a dependency_args=()
+    if [[ -n "${dependency_job}" ]]; then
+        dependency_args=(--dependency="afterok:${dependency_job}")
+    fi
+
     array_last=$((PHASE2_SEEDS * MODEL_COUNT - 1))
     array_spec="0-${array_last}%${MAX_PARALLEL}"
     array_job="$(sbatch --parsable \
@@ -316,14 +340,14 @@ submit_experiment() {
         --time="${TIME_LIMIT}" \
         --hint="${SLURM_HINT}" \
         --array="${array_spec}" \
-        --dependency="afterok:${pilot_job}" \
+        "${dependency_args[@]}" \
         --chdir="${REPO_ROOT}" \
         --output="${EXPERIMENT_ROOT}/slurm/phase2_%A_%a.out" \
         --error="${EXPERIMENT_ROOT}/slurm/phase2_%A_%a.err" \
         --export=ALL \
         "${SCRIPT_PATH}" __worker phase2)"
     array_job="${array_job%%;*}"
-    printf 'phase2_array_job=%s\n' "${array_job}" | tee -a "${submission_partial}"
+    printf 'phase2_array_job=%s\n' "${array_job}" | tee -a "${submission_file}"
 
     summary_job="$(sbatch --parsable \
         --job-name=prost-med-summary \
@@ -340,13 +364,124 @@ submit_experiment() {
         --export=ALL \
         "${SCRIPT_PATH}" __summarize "${array_job}")"
     summary_job="${summary_job%%;*}"
-    printf 'summary_job=%s\n' "${summary_job}" | tee -a "${submission_partial}"
-    mv -- "${submission_partial}" "${EXPERIMENT_ROOT}/submission.txt"
-    cat "${EXPERIMENT_ROOT}/submission.txt"
+    printf 'summary_job=%s\n' "${summary_job}" | tee -a "${submission_file}"
 
-    printf '\nPhase two contains %s paired seeds x %s model tasks and starts only if all pilot models succeed.\n' \
-        "${PHASE2_SEEDS}" "${MODEL_COUNT}"
-    printf 'Monitor with: squeue -j %s,%s,%s\n' "${pilot_job}" "${array_job}" "${summary_job}"
+    SUBMITTED_PHASE2_ARRAY_JOB="${array_job}"
+    SUBMITTED_SUMMARY_JOB="${summary_job}"
+}
+
+submission_value() {
+    local file="${1:?submission file is required}"
+    local key="${2:?submission key is required}"
+    awk -F= -v key="${key}" '$1 == key { print $2; exit }' "${file}"
+}
+
+validate_resume_configuration() {
+    local configuration="${EXPERIMENT_ROOT}/configuration.txt"
+    [[ -f "${configuration}" ]] || die "Missing original configuration: ${configuration}"
+
+    local key expected actual
+    while IFS='|' read -r key expected; do
+        actual="$(submission_value "${configuration}" "${key}")"
+        [[ -n "${actual}" ]] || die "Original configuration is missing ${key}."
+        [[ "${actual}" == "${expected}" ]] || \
+            die "Cannot resume with ${key}=${expected}; original submission used ${actual}."
+    done <<EOF
+pilot_seed|${PILOT_SEED}
+phase2_seeds|${PHASE2_SEEDS}
+phase2_seed_base|${PHASE2_SEED_BASE}
+models|${MODELS// /,}
+epochs|${EPOCHS}
+batch_size|${BATCH_SIZE}
+gradient_accumulation_steps|${GRADIENT_ACCUMULATION_STEPS}
+num_workers|${NUM_WORKERS}
+patience|${PATIENCE}
+learning_rate|${LEARNING_RATE}
+weight_decay|${WEIGHT_DECAY}
+EOF
+}
+
+validate_completed_pilots() {
+    "${VENV_DIR}/bin/python" - "${EXPERIMENT_ROOT}" "${PILOT_SEED}" <<'PY'
+import csv
+import json
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1]) / "phase1" / f"seed_{sys.argv[2]}"
+patterns = {
+    "real": "*_real",
+    "complex_max": "*_complex_modrelu",
+    "complex_median": "*_complex_modrelu_median_pool",
+    "complex_average": "*_complex_modrelu_average_pool",
+}
+required = ("config.json", "history.csv", "threshold.json", "test_metrics.json")
+for model, pattern in patterns.items():
+    matches = [path for path in root.glob(f"job_*_0/{pattern}") if path.is_dir()]
+    if len(matches) != 1:
+        raise SystemExit(
+            f"Expected one completed pilot run for {model} under {root}; found {len(matches)}"
+        )
+    run = matches[0]
+    missing = [name for name in required if not (run / name).is_file()]
+    if missing:
+        raise SystemExit(f"Incomplete pilot {model} in {run}: missing {', '.join(missing)}")
+    with (run / "history.csv").open(newline="", encoding="utf-8") as handle:
+        if not any(csv.DictReader(handle)):
+            raise SystemExit(f"Pilot history is empty: {run / 'history.csv'}")
+    with (run / "test_metrics.json").open(encoding="utf-8") as handle:
+        metrics = json.load(handle)
+    for metric in ("auc", "average_precision", "balanced_accuracy"):
+        if metric not in metrics:
+            raise SystemExit(f"Pilot {model} is missing test metric {metric}")
+    print(f"Validated completed pilot {model}: {run}")
+PY
+}
+
+resume_phase2() {
+    command -v sbatch >/dev/null 2>&1 || die "sbatch is not available; run this command on a Slurm login node."
+    command -v squeue >/dev/null 2>&1 || die "squeue is not available; run this command on a Slurm login node."
+    check_configuration
+    check_repository
+
+    local original_submission="${EXPERIMENT_ROOT}/submission.txt"
+    local recovery_file="${EXPERIMENT_ROOT}/phase2_resume.txt"
+    local recovery_partial="${EXPERIMENT_ROOT}/phase2_resume.partial"
+    [[ -f "${original_submission}" ]] || die "Missing original submission: ${original_submission}"
+    [[ ! -e "${recovery_file}" ]] || die "Phase two was already resumed; inspect ${recovery_file}."
+    [[ ! -e "${recovery_partial}" ]] || die "A partial phase-two recovery exists: ${recovery_partial}"
+    [[ ! -e "${EXPERIMENT_ROOT}/PHASE2_COMPLETE" ]] || die "Phase two is already complete."
+    if find "${EXPERIMENT_ROOT}/phase2" -name test_metrics.json -print -quit | grep -q .; then
+        die "Phase two already contains test results; refusing an automatic recovery."
+    fi
+
+    local obsolete_array obsolete_summary queued
+    obsolete_array="$(submission_value "${original_submission}" phase2_array_job)"
+    obsolete_summary="$(submission_value "${original_submission}" summary_job)"
+    [[ -n "${obsolete_array}" && -n "${obsolete_summary}" ]] || \
+        die "Original submission does not contain phase-two and summary job IDs."
+    queued="$(squeue -h -j "${obsolete_array},${obsolete_summary}" 2>/dev/null || true)"
+    [[ -z "${queued}" ]] || \
+        die "Obsolete jobs are still queued. Run: scancel ${obsolete_array} ${obsolete_summary}"
+
+    ensure_environment
+    validate_data
+    validate_resume_configuration
+    validate_completed_pilots
+    export_worker_environment
+
+    {
+        printf 'recovery_git_commit=%s\n' "$(git -C "${REPO_ROOT}" rev-parse HEAD)"
+        printf 'resumed_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        printf 'superseded_phase2_array_job=%s\n' "${obsolete_array}"
+        printf 'superseded_summary_job=%s\n' "${obsolete_summary}"
+    } > "${recovery_partial}"
+    submit_phase2_jobs "" "${recovery_partial}"
+    mv -- "${recovery_partial}" "${recovery_file}"
+    cat "${recovery_file}"
+    printf '\nValidated the four completed pilots; they will not be rerun.\n'
+    printf 'Monitor with: squeue -j %s,%s\n' \
+        "${SUBMITTED_PHASE2_ARRAY_JOB}" "${SUBMITTED_SUMMARY_JOB}"
     printf 'Results will be written under: %s\n' "${EXPERIMENT_ROOT}"
 }
 
@@ -369,7 +504,8 @@ stage_worker_data() {
 run_worker() {
     local phase="${1:?worker phase is required}"
     local seed task_index seed_index model_index model_key mode pooling completion_marker failure_marker
-    local job_token run_dir torch_threads exit_status worker_manifest
+    local job_token run_dir torch_threads worker_manifest
+    local run_dir_q completion_marker_q failure_marker_q
     [[ -n "${SLURM_JOB_ID:-}" ]] || die "The worker must run inside a Slurm allocation."
     [[ -x "${VENV_DIR}/bin/python" ]] || die "Missing experiment environment at ${VENV_DIR}."
 
@@ -409,14 +545,21 @@ run_worker() {
         die "Refusing to overwrite completed ${model_key} run in ${run_dir}."
 
     worker_exit() {
-        exit_status=$?
+        local exit_status=$?
+        local worker_run_dir="${1:?worker run directory is required}"
+        local worker_completion_marker="${2:?worker completion marker is required}"
+        local worker_failure_marker="${3:?worker failure marker is required}"
         if (( exit_status == 0 )); then
-            touch "${run_dir}/${completion_marker}"
+            rm -f -- "${worker_run_dir}/${worker_failure_marker}"
+            touch "${worker_run_dir}/${worker_completion_marker}"
         else
-            printf '%s\n' "${exit_status}" > "${run_dir}/${failure_marker}"
+            printf '%s\n' "${exit_status}" > "${worker_run_dir}/${worker_failure_marker}"
         fi
     }
-    trap worker_exit EXIT
+    printf -v run_dir_q '%q' "${run_dir}"
+    printf -v completion_marker_q '%q' "${completion_marker}"
+    printf -v failure_marker_q '%q' "${failure_marker}"
+    trap "worker_exit ${run_dir_q} ${completion_marker_q} ${failure_marker_q}" EXIT
 
     torch_threads=$((CPUS - NUM_WORKERS))
     export OMP_NUM_THREADS="${torch_threads}"
@@ -523,6 +666,9 @@ case "${1:-submit}" in
     check)
         check_host
         ;;
+    resume-phase2)
+        resume_phase2
+        ;;
     __worker)
         shift
         check_configuration
@@ -533,6 +679,6 @@ case "${1:-submit}" in
         summarize_phase2 "$@"
         ;;
     *)
-        die "Usage: bash scripts/run_cluster_experiment.sh [check|submit]"
+        die "Usage: bash scripts/run_cluster_experiment.sh [check|submit|resume-phase2]"
         ;;
 esac

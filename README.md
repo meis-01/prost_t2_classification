@@ -136,3 +136,23 @@ them with the printed `squeue` command and inspect `slurm/*.out` and
 
 The launcher refuses to reuse an existing experiment directory. Set a new,
 descriptive `EXPERIMENT_NAME` for any intentional rerun.
+
+### Recover phase two after completed pilots
+
+If all four pilots produced complete run artifacts but an obsolete launcher
+caused Slurm to mark the pilot array failed, cancel the blocked phase-two and
+summary jobs, update the `exp` branch, and use the guarded recovery command:
+
+```bash
+scancel OLD_PHASE2_JOB OLD_SUMMARY_JOB
+git pull --ff-only origin exp
+EXPERIMENT_ROOT=/absolute/path/to/the/existing/experiment \
+  bash scripts/run_cluster_experiment.sh resume-phase2
+```
+
+`resume-phase2` validates the original configuration and all four pilot
+`config.json`, `history.csv`, `threshold.json`, and `test_metrics.json` files.
+It refuses to run while the obsolete jobs are queued, when phase-two test
+results already exist, or after a prior recovery. It then submits only the
+20-seed, four-model phase-two array and its dependent summary job; the pilots
+are not rerun. The replacement job IDs are recorded in `phase2_resume.txt`.
