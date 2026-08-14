@@ -18,7 +18,7 @@ from .logging_utils import get_logger, timestamp_slug
 from .models import ComplexPooling, build_model
 
 
-Mode = Literal["real", "complex"]
+Mode = Literal["real", "complex", "complex_kspace"]
 
 
 @dataclass(frozen=True)
@@ -52,10 +52,12 @@ class TrainConfig:
             raise ValueError("patience must be at least 1.")
         if self.num_workers < 0:
             raise ValueError("num_workers must be non-negative.")
-        if self.mode not in ("real", "complex"):
+        if self.mode not in ("real", "complex", "complex_kspace"):
             raise ValueError(f"Unknown model mode: {self.mode}")
         if self.complex_pooling not in ("max", "median", "average"):
             raise ValueError(f"Unknown complex pooling mode: {self.complex_pooling}")
+        if self.mode == "complex_kspace" and self.complex_pooling != "average":
+            raise ValueError("complex_kspace mode requires average complex pooling")
 
 
 def train_both_models(
@@ -221,6 +223,8 @@ def train_model(config: TrainConfig) -> Path:
 
 
 def run_label_from_config(config: TrainConfig) -> str:
+    if config.mode == "complex_kspace":
+        return "complex_kspace_modrelu_average_pool"
     if config.mode == "complex":
         if config.complex_pooling == "max":
             return "complex_modrelu"

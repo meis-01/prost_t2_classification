@@ -9,15 +9,21 @@ from .logging_utils import configure_logging
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="prost-t2",
-        description="Train the paired real and complex T2 classifiers from prepared four-coil NPZ data.",
+        description="Train real, complex-image, and complex-k-space T2 classifiers from prepared four-coil NPZ data.",
     )
     parser.add_argument("--log-dir", type=Path, default=None)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    train_parser = subparsers.add_parser("train", help="Train real, complex, or both models.")
+    train_parser = subparsers.add_parser(
+        "train", help="Train a real, complex-image, complex-k-space, or paired model configuration."
+    )
     train_parser.add_argument("--manifest", type=Path, required=True)
     train_parser.add_argument("--runs-dir", type=Path, required=True)
-    train_parser.add_argument("--mode", choices=("real", "complex", "both"), default="both")
+    train_parser.add_argument(
+        "--mode",
+        choices=("real", "complex", "complex_kspace", "both"),
+        default="both",
+    )
     train_parser.add_argument("--epochs", type=int, default=20)
     train_parser.add_argument("--batch-size", type=int, default=8)
     train_parser.add_argument("--gradient-accumulation-steps", type=int, default=4)
@@ -31,7 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--complex-pooling",
         choices=("max", "median", "average"),
         default="max",
-        help="Intermediate pooling used by the complex model.",
+        help="Intermediate pooling used by the complex-image model; complex_kspace always uses average.",
     )
     train_parser.set_defaults(func=cmd_train)
     return parser
@@ -50,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
 def cmd_train(args: argparse.Namespace) -> int:
     from .train import TrainConfig, train_both_models, train_model
 
+    complex_pooling = "average" if args.mode == "complex_kspace" else args.complex_pooling
     common = {
         "epochs": args.epochs,
         "batch_size": args.batch_size,
@@ -60,7 +67,7 @@ def cmd_train(args: argparse.Namespace) -> int:
         "seed": args.seed,
         "num_workers": args.num_workers,
         "device": args.device,
-        "complex_pooling": args.complex_pooling,
+        "complex_pooling": complex_pooling,
     }
     if args.mode == "both":
         train_both_models(args.manifest, args.runs_dir, **common)

@@ -3,6 +3,16 @@ from __future__ import annotations
 import numpy as np
 
 
+def centered_fft2(image: np.ndarray) -> np.ndarray:
+    """Transform complex coil images to centered, orthonormal k-space."""
+    if image.ndim < 2:
+        raise ValueError("image must have at least two spatial dimensions.")
+    spatial_axes = (-2, -1)
+    shifted = np.fft.ifftshift(image, axes=spatial_axes)
+    kspace = np.fft.fft2(shifted, axes=spatial_axes, norm="ortho")
+    return np.fft.fftshift(kspace, axes=spatial_axes).astype(np.complex64)
+
+
 def align_multicoil_phase(
     image: np.ndarray,
     *,

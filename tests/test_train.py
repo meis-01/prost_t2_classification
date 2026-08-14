@@ -76,6 +76,27 @@ def test_complex_pooling_has_distinct_run_label(tmp_path, pooling, expected):
     assert run_label_from_config(config) == expected
 
 
+def test_kspace_model_has_distinct_average_pool_run_label(tmp_path):
+    config = TrainConfig(
+        manifest=tmp_path / "manifest.csv",
+        runs_dir=tmp_path / "runs",
+        mode="complex_kspace",
+        complex_pooling="average",
+    )
+
+    assert run_label_from_config(config) == "complex_kspace_modrelu_average_pool"
+
+
+def test_kspace_model_rejects_non_average_pooling(tmp_path):
+    with pytest.raises(ValueError, match="requires average"):
+        TrainConfig(
+            manifest=tmp_path / "manifest.csv",
+            runs_dir=tmp_path / "runs",
+            mode="complex_kspace",
+            complex_pooling="max",
+        )
+
+
 def test_gradient_accumulation_steps_final_partial_group():
     reference_model = torch.nn.Linear(2, 1)
     accumulated_model = torch.nn.Linear(2, 1)

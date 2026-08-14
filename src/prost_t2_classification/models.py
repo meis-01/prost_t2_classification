@@ -256,8 +256,15 @@ class ComplexT2CNN(nn.Module):
         return self.classifier(self.dropout(pooled)).squeeze(-1)
 
 
+class ComplexKSpaceCNN(ComplexT2CNN):
+    """Complex classifier operating directly on k-space with average pooling."""
+
+    def __init__(self) -> None:
+        super().__init__(pooling="average")
+
+
 def build_model(
-    mode: Literal["real", "complex"],
+    mode: Literal["real", "complex", "complex_kspace"],
     *,
     complex_pooling: ComplexPooling = "max",
 ) -> nn.Module:
@@ -265,4 +272,6 @@ def build_model(
         return RealAmplitudeCNN()
     if mode == "complex":
         return ComplexT2CNN(pooling=complex_pooling)
+    if mode == "complex_kspace":
+        return ComplexKSpaceCNN()
     raise ValueError(f"Unknown model mode: {mode}")

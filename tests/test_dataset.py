@@ -1,8 +1,18 @@
+import numpy as np
 import pandas as pd
 import pytest
 import torch
 
-from prost_t2_classification.dataset import make_dataloaders, validate_manifest
+from prost_t2_classification.dataset import (
+    T2CoilNPZDataset,
+    make_dataloaders,
+    validate_manifest,
+)
+from prost_t2_classification.image_ops import (
+    align_multicoil_phase,
+    centered_fft2,
+    scale_complex_by_magnitude,
+)
 
 
 def _valid_manifest() -> pd.DataFrame:
@@ -68,3 +78,32 @@ def test_balanced_sampler_sequence_depends_only_on_experiment_seed(tmp_path):
     )
 
     assert list(first.train.sampler) == list(second.train.sampler)
+
+
+def test_kspace_mode_transforms_prepared_complex_images(tmp_path):
+    manifest = _valid_manifest()
+    samples = tmp_path / "samples"
+    samples.mkdir()
+    rng = np.random.default_rng(73191)
+    images = {}
+    for row in manifest.itertuples():
+        image = (
+            rng.standard_normal((4, 8, 8))
+            + 1j * rng.standard_normal((4, 8, 8))
+        ).astype(np.complex64)
+        images[row.path] = image
+        np.savez_compressed(tmp_path / row.path, image_complex=image)
+    manifest_path = tmp_path / "manifest.csv"
+    manifest.to_csv(manifest_path, index=False)
+
+    dataset = T2CoilNPZDataset(
+        manifest_path,
+        split="training",
+        mode="complex_kspace",
+    )
+    tensor, _ = dataset[0]
+
+    expected = centered_fft2(align_multicoil_phase(images[dataset.rows.iloc[0]["path"]]))
+    expected = scale_complex_by_magnitude(expected, shared_scale=True)
+    assert tensor.dtype == torch.complex64
+    assert torch.allclose(tensor, torch.from_numpy(expected))

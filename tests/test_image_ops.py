@@ -2,6 +2,7 @@ import numpy as np
 
 from prost_t2_classification.image_ops import (
     align_multicoil_phase,
+    centered_fft2,
     scale_complex_by_magnitude,
 )
 
@@ -15,6 +16,17 @@ def test_scale_complex_by_magnitude_uses_robust_percentile():
     assert scaled.dtype == np.complex64
     assert np.isclose(np.abs(scaled[0, 0, 1]), 1.0)
     assert np.isclose(np.abs(scaled[0, 0, 0]), 100.0)
+
+
+def test_centered_fft2_places_constant_signal_at_kspace_center():
+    image = np.ones((2, 8, 8), dtype=np.complex64)
+
+    kspace = centered_fft2(image)
+
+    expected = np.zeros_like(kspace)
+    expected[:, 4, 4] = 8
+    assert kspace.dtype == np.complex64
+    assert np.allclose(kspace, expected)
 
 
 def test_align_multicoil_phase_removes_global_and_coil_offsets():

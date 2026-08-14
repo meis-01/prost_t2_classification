@@ -82,6 +82,22 @@ The complex model supports three intermediate pooling modes: `max` (default),
 `--complex-pooling max|median|average`. Each non-default mode receives a distinct
 run-directory suffix so results cannot be mixed accidentally.
 
+The k-space classifier transforms each prepared complex coil image with a
+centered orthonormal FFT, then performs classification directly on the complex
+k-space tensor without an inverse FFT. It has the same trainable parameter
+count as the complex-image variants and always uses complex average pooling:
+
+```powershell
+python -m prost_t2_classification train `
+  --manifest data/manifest.csv `
+  --runs-dir runs/kspace_average `
+  --mode complex_kspace `
+  --device cpu `
+  --epochs 20 `
+  --batch-size 2 `
+  --gradient-accumulation-steps 16
+```
+
 ## Resume and results
 
 Re-run the exact same command after an interruption. Completed seeds are

@@ -4,6 +4,7 @@ import pytest
 from prost_t2_classification.models import (
     COMPLEX_CHANNELS,
     ComplexAveragePool2d,
+    ComplexKSpaceCNN,
     ComplexMagnitudeMaxPool2d,
     ComplexMagnitudeMedianPool2d,
     ModReLU,
@@ -116,6 +117,27 @@ def test_real_model_matches_complex_scalar_parameter_budget():
     complex_params = _trainable_params(build_model("complex"))
 
     assert real_params / complex_params == pytest.approx(1.0, rel=0.01)
+
+
+def test_kspace_model_uses_average_pooling_and_matches_parameter_budget():
+    model = build_model("complex_kspace")
+    kspace_params = _trainable_params(model)
+    complex_params = _trainable_params(build_model("complex", complex_pooling="average"))
+    real_params = _trainable_params(build_model("real"))
+
+    assert isinstance(model, ComplexKSpaceCNN)
+    assert all(
+        isinstance(pool, ComplexAveragePool2d)
+        for pool in (model.pool1, model.pool2, model.pool3)
+    )
+    assert kspace_params == complex_params
+    assert real_params / kspace_params == pytest.approx(1.0, rel=0.01)
+
+    x = torch.complex(torch.randn(2, 4, 32, 32), torch.randn(2, 4, 32, 32))
+    model.eval()
+    with torch.no_grad():
+        output = model(x)
+    assert output.shape == (2,)
 
 
 def test_complex_model_is_invariant_to_global_phase():
