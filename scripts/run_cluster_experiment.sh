@@ -172,7 +172,13 @@ check_slurm_array_capacity() {
     command -v sbatch >/dev/null 2>&1 || die "sbatch is unavailable on this host."
     if command -v scontrol >/dev/null 2>&1; then
         local max_array_size
-        max_array_size="$(scontrol show config 2>/dev/null | awk -F= '/MaxArraySize/ {gsub(/[[:space:]]/, "", $2); print $2; exit}')"
+        max_array_size="$(scontrol show config 2>/dev/null | awk -F= '
+            /MaxArraySize/ && !found {
+                gsub(/[[:space:]]/, "", $2)
+                print $2
+                found = 1
+            }
+        ')"
         if [[ "${max_array_size}" =~ ^[1-9][0-9]*$ ]]; then
             (( MODEL_COUNT <= max_array_size )) || die "Pilot needs ${MODEL_COUNT} array entries; cluster MaxArraySize is ${max_array_size}."
         fi

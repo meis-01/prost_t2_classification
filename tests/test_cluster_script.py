@@ -12,6 +12,8 @@ def test_cluster_workflow_launches_one_complete_array_per_seed():
     assert 'PHASE2_SEEDS="${PHASE2_SEEDS:-4}"' in script
     assert 'MAX_PARALLEL="${MAX_PARALLEL:-0}"' in script
     assert 'TIME_LIMIT="${TIME_LIMIT:-48:00:00}"' in script
+    assert "/MaxArraySize/ && !found" in script
+    assert "found = 1" in script
     assert "model_array_spec()" in script
     assert "if (( MAX_PARALLEL == 0 ))" in script
     assert "printf '0-%s\\n'" in script
