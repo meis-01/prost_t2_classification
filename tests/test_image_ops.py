@@ -2,8 +2,22 @@ import numpy as np
 
 from prost_t2_classification.image_ops import (
     align_multicoil_phase,
+    centered_fft2,
     scale_complex_by_magnitude,
 )
+
+
+def test_centered_fft2_is_orthonormal_and_places_constant_at_center():
+    image = np.ones((2, 8, 8), dtype=np.complex64)
+
+    transformed = centered_fft2(image)
+
+    assert transformed.dtype == np.complex64
+    assert np.allclose(
+        np.sum(np.abs(transformed) ** 2), np.sum(np.abs(image) ** 2), atol=1e-5
+    )
+    assert np.count_nonzero(np.abs(transformed) > 1e-6) == 2
+    assert np.all(np.abs(transformed[:, 4, 4]) > 0)
 
 
 def test_scale_complex_by_magnitude_uses_robust_percentile():

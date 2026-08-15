@@ -3,6 +3,13 @@ from __future__ import annotations
 import numpy as np
 
 
+def centered_fft2(image: np.ndarray) -> np.ndarray:
+    """Apply an orthonormal centered 2-D FFT over the spatial dimensions."""
+    shifted = np.fft.ifftshift(image, axes=(-2, -1))
+    transformed = np.fft.fft2(shifted, axes=(-2, -1), norm="ortho")
+    return np.fft.fftshift(transformed, axes=(-2, -1)).astype(np.complex64)
+
+
 def align_multicoil_phase(
     image: np.ndarray,
     *,

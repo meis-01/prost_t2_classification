@@ -8,14 +8,23 @@ from prost_t2_classification.experiment_summary import (
     paired_sign_flip_pvalue,
     summarize_phase2,
 )
+from prost_t2_classification.experiment_grid import experiment_model_specs
 
 
-def _write_run(run_dir, *, mode, seed, auc, pooling="none"):
-    run_dir.mkdir()
+def _write_run(run_dir, *, spec, seed, auc):
+    run_dir.mkdir(parents=True)
     config = {
-        "mode": mode,
+        "mode": spec.mode,
         "seed": seed,
-        "complex_pooling": pooling,
+        "model_key": spec.model_key,
+        "complex_input_domain": spec.input_domain,
+        "complex_pooling": spec.pooling,
+        "complex_normalization": spec.normalization,
+        "complex_convolution": spec.convolution,
+        "complex_streams": spec.streams,
+        "complex_interaction": spec.interaction,
+        "complex_activation": spec.activation,
+        "trainable_parameters": 1_680_000,
     }
     (run_dir / "config.json").write_text(json.dumps(config), encoding="utf-8")
     pd.DataFrame(
@@ -41,7 +50,7 @@ def _write_run(run_dir, *, mode, seed, auc, pooling="none"):
     )
 
 
-def test_default_twenty_seed_sign_flip_test_is_exact():
+def test_twenty_seed_sign_flip_test_is_exact():
     pvalue, method, permutations = paired_sign_flip_pvalue(np.ones(20))
 
     assert method == "exact"
@@ -50,53 +59,37 @@ def test_default_twenty_seed_sign_flip_test_is_exact():
 
 
 def test_summarize_phase2_writes_all_pooling_comparisons(tmp_path):
-    array_job = "9876"
     seed_base = 24000
     real_aucs = [0.60, 0.65, 0.70]
+    selected_specs = {
+        spec.model_key: spec for spec in experiment_model_specs()[:4]
+    }
+    offsets = {
+        "real": 0.0,
+        "complex_max": 0.05,
+        "complex_median": 0.10,
+        "complex_average": 0.02,
+    }
     for index, real_auc in enumerate(real_aucs):
         seed = seed_base + index + 1
-        job_dir = (
-            tmp_path
-            / "phase2"
-            / f"seed_{seed}"
-            / f"job_{array_job}_{index}"
-        )
-        job_dir.mkdir(parents=True)
-        for marker in (
-            "REAL_COMPLETE",
-            "COMPLEX_MAX_COMPLETE",
-            "COMPLEX_MEDIAN_COMPLETE",
-            "COMPLEX_AVERAGE_COMPLETE",
-        ):
-            (job_dir / marker).touch()
-        _write_run(job_dir / "20260811_real", mode="real", seed=seed, auc=real_auc)
-        _write_run(
-            job_dir / "20260811_complex_modrelu",
-            mode="complex",
-            seed=seed,
-            auc=real_auc + 0.05,
-            pooling="max",
-        )
-        _write_run(
-            job_dir / "20260811_complex_modrelu_median_pool",
-            mode="complex",
-            seed=seed,
-            auc=real_auc + 0.10,
-            pooling="median",
-        )
-        _write_run(
-            job_dir / "20260811_complex_modrelu_average_pool",
-            mode="complex",
-            seed=seed,
-            auc=real_auc + 0.02,
-            pooling="average",
-        )
+        for model, spec in selected_specs.items():
+            model_dir = tmp_path / "phase2" / f"seed_{seed}" / "models" / model
+            attempt_dir = model_dir / "attempt_1"
+            attempt_dir.mkdir(parents=True)
+            (model_dir / "COMPLETE").touch()
+            (attempt_dir / "SUCCESS").touch()
+            _write_run(
+                attempt_dir / f"20260811_{model}",
+                spec=spec,
+                seed=seed,
+                auc=real_auc + offsets[model],
+            )
 
     summarize_phase2(
         tmp_path,
-        array_job=array_job,
         count=len(real_aucs),
         seed_base=seed_base,
+        model_specs=selected_specs,
     )
 
     metrics = pd.read_csv(tmp_path / "metrics_by_seed.csv")

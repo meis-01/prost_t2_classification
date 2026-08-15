@@ -2,31 +2,16 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from .experiment_grid import ExperimentModelSpec, experiment_model_specs
 
-MODEL_SPECS = {
-    "real": {"pattern": "*_real", "mode": "real", "pooling": "none"},
-    "complex_max": {
-        "pattern": "*_complex_modrelu",
-        "mode": "complex",
-        "pooling": "max",
-    },
-    "complex_median": {
-        "pattern": "*_complex_modrelu_median_pool",
-        "mode": "complex",
-        "pooling": "median",
-    },
-    "complex_average": {
-        "pattern": "*_complex_modrelu_average_pool",
-        "mode": "complex",
-        "pooling": "average",
-    },
-}
-COMPLEX_MODELS = ("complex_max", "complex_median", "complex_average")
+MODEL_SPECS = {spec.model_key: spec for spec in experiment_model_specs()}
+COMPLEX_MODELS = tuple(model for model in MODEL_SPECS if model != "real")
 VALUE_COLUMNS = [
     "best_val_auc",
     "val_balanced_accuracy",
@@ -43,9 +28,9 @@ PRIMARY_COMPARISON = "complex_median_minus_real"
 def paired_sign_flip_pvalue(values: np.ndarray) -> tuple[float, str, int]:
     """Return a two-sided paired sign-flip p-value for the mean difference.
 
-    The default 20-seed experiment is enumerated exactly. Larger custom
-    experiments use a deterministic one-million-draw Monte Carlo estimate so
-    an override cannot allocate an exponentially large array.
+    Experiments with up to 22 paired seeds are enumerated exactly. Larger
+    custom experiments use a deterministic one-million-draw Monte Carlo
+    estimate so an override cannot allocate an exponentially large array.
     """
 
     differences = np.asarray(values, dtype=float)
@@ -90,36 +75,38 @@ def paired_sign_flip_pvalue(values: np.ndarray) -> tuple[float, str, int]:
 def summarize_phase2(
     experiment_root: Path,
     *,
-    array_job: str,
     count: int,
     seed_base: int,
+    model_specs: Mapping[str, ExperimentModelSpec] | None = None,
 ) -> None:
     if count < 1:
         raise ValueError("count must be positive.")
 
+    selected_specs = MODEL_SPECS if model_specs is None else model_specs
+    complex_models = tuple(model for model in selected_specs if model != "real")
     records: list[dict[str, object]] = []
     seeds = [seed_base + index + 1 for index in range(count)]
-    for index, seed in enumerate(seeds):
-        job_dir = (
-            experiment_root
-            / "phase2"
-            / f"seed_{seed}"
-            / f"job_{array_job}_{index}"
-        )
-        for model, spec in MODEL_SPECS.items():
-            completion_marker = job_dir / f"{model.upper()}_COMPLETE"
+    for seed in seeds:
+        for model, spec in selected_specs.items():
+            model_dir = experiment_root / "phase2" / f"seed_{seed}" / "models" / model
+            completion_marker = model_dir / "COMPLETE"
             if not completion_marker.is_file():
                 raise FileNotFoundError(
                     f"Missing completion marker: {completion_marker}"
                 )
-            run_dirs = [
-                path for path in job_dir.glob(str(spec["pattern"])) if path.is_dir()
-            ]
+            required = ("config.json", "history.csv", "threshold.json", "test_metrics.json")
+            run_dirs = []
+            for success in model_dir.glob("attempt_*/SUCCESS"):
+                run_dirs.extend(
+                    path.parent
+                    for path in success.parent.glob("*/config.json")
+                    if all((path.parent / name).is_file() for name in required)
+                )
             if len(run_dirs) != 1:
                 raise RuntimeError(
-                    f"Expected one {model} run in {job_dir}; found {len(run_dirs)}"
+                    f"Expected one {model} run in {model_dir}; found {len(run_dirs)}"
                 )
-            records.append(_read_run(run_dirs[0], model=model, expected_seed=seed))
+            records.append(_read_run(run_dirs[0], model=model, spec=spec, expected_seed=seed))
 
     metrics = pd.DataFrame(records).sort_values(["seed", "model"])
     metrics.to_csv(experiment_root / "metrics_by_seed.csv", index=False)
@@ -138,17 +125,18 @@ def summarize_phase2(
     )
 
     wide = metrics.pivot(index="seed", columns="model", values=available)
-    deltas = pd.DataFrame(index=wide.index)
-    for model in COMPLEX_MODELS:
+    delta_data: dict[str, pd.Series] = {}
+    for model in complex_models:
         for metric in available:
-            deltas[_delta_column(metric, model)] = (
+            delta_data[_delta_column(metric, model)] = (
                 wide[(metric, model)] - wide[(metric, "real")]
             )
+    deltas = pd.DataFrame(delta_data, index=wide.index)
     deltas.reset_index().to_csv(experiment_root / "paired_deltas.csv", index=False)
 
     rng = np.random.default_rng(73191)
     paired_summary: list[dict[str, object]] = []
-    for model in COMPLEX_MODELS:
+    for model in complex_models:
         comparison = f"{model}_minus_real"
         for metric in available:
             column = _delta_column(metric, model)
@@ -188,12 +176,13 @@ def summarize_phase2(
     )
 
     metadata = {
-        "models": list(MODEL_SPECS),
-        "comparisons": [f"{model}_minus_real" for model in COMPLEX_MODELS],
+        "models": list(selected_specs),
+        "comparisons": [f"{model}_minus_real" for model in complex_models],
         "primary_comparison": PRIMARY_COMPARISON,
         "exploratory_comparisons": [
-            "complex_max_minus_real",
-            "complex_average_minus_real",
+            f"{model}_minus_real"
+            for model in complex_models
+            if f"{model}_minus_real" != PRIMARY_COMPARISON
         ],
         "primary_endpoint": PRIMARY_ENDPOINT,
         "secondary_endpoints": [
@@ -213,15 +202,20 @@ def summarize_phase2(
     print(f"Wrote phase-two summaries for {count} paired seeds to {experiment_root}")
 
 
-def _read_run(run_dir: Path, *, model: str, expected_seed: int) -> dict[str, object]:
+def _read_run(
+    run_dir: Path,
+    *,
+    model: str,
+    spec: ExperimentModelSpec,
+    expected_seed: int,
+) -> dict[str, object]:
     required = ["config.json", "history.csv", "threshold.json", "test_metrics.json"]
     missing = [name for name in required if not (run_dir / name).is_file()]
     if missing:
         raise FileNotFoundError(f"Missing {', '.join(missing)} in {run_dir}")
 
     config = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
-    spec = MODEL_SPECS[model]
-    expected_mode = str(spec["mode"])
+    expected_mode = spec.mode
     if config.get("mode") != expected_mode:
         raise RuntimeError(
             f"Expected mode={expected_mode} in {run_dir}; found {config.get('mode')!r}"
@@ -230,12 +224,23 @@ def _read_run(run_dir: Path, *, model: str, expected_seed: int) -> dict[str, obj
         raise RuntimeError(
             f"Expected seed={expected_seed} in {run_dir}; found {config.get('seed')!r}"
         )
-    expected_pooling = str(spec["pooling"])
-    if expected_mode == "complex" and config.get("complex_pooling") != expected_pooling:
-        raise RuntimeError(
-            f"Expected {expected_pooling} pooling in {run_dir}; "
-            f"found {config.get('complex_pooling')!r}"
-        )
+    expected_pooling = spec.pooling
+    expected_factors = {
+        "model_key": spec.model_key,
+        "complex_input_domain": spec.input_domain,
+        "complex_pooling": spec.pooling,
+        "complex_normalization": spec.normalization,
+        "complex_convolution": spec.convolution,
+        "complex_streams": spec.streams,
+        "complex_interaction": spec.interaction,
+        "complex_activation": spec.activation,
+    }
+    if expected_mode == "complex":
+        for key, expected in expected_factors.items():
+            if config.get(key) != expected:
+                raise RuntimeError(
+                    f"Expected {key}={expected} in {run_dir}; found {config.get(key)!r}"
+                )
 
     test = json.loads((run_dir / "test_metrics.json").read_text(encoding="utf-8"))
     threshold = json.loads((run_dir / "threshold.json").read_text(encoding="utf-8"))
@@ -250,7 +255,14 @@ def _read_run(run_dir: Path, *, model: str, expected_seed: int) -> dict[str, obj
     return {
         "seed": expected_seed,
         "model": model,
+        "input_domain": spec.input_domain,
         "pooling": expected_pooling,
+        "normalization": spec.normalization,
+        "convolution": spec.convolution,
+        "streams": spec.streams,
+        "interaction": spec.interaction,
+        "activation": spec.activation,
+        "trainable_parameters": int(config.get("trainable_parameters", 0)),
         "epochs_completed": len(history),
         "best_epoch": int(best_row["epoch"]) + 1,
         "best_val_auc": float(best_row["val_auc"]),
@@ -267,7 +279,6 @@ def build_parser() -> argparse.ArgumentParser:
         description="Aggregate paired real and complex-pooling seed runs."
     )
     parser.add_argument("--experiment-root", type=Path, required=True)
-    parser.add_argument("--array-job", required=True)
     parser.add_argument("--count", type=int, required=True)
     parser.add_argument("--seed-base", type=int, required=True)
     return parser
@@ -281,7 +292,6 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     summarize_phase2(
         args.experiment_root,
-        array_job=args.array_job,
         count=args.count,
         seed_base=args.seed_base,
     )

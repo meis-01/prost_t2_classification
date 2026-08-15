@@ -76,6 +76,34 @@ def test_complex_pooling_has_distinct_run_label(tmp_path, pooling, expected):
     assert run_label_from_config(config) == expected
 
 
+def test_full_grid_configuration_has_factor_encoded_run_label(tmp_path):
+    config = TrainConfig(
+        manifest=tmp_path / "manifest.csv",
+        runs_dir=tmp_path / "runs",
+        mode="complex",
+        complex_pooling="average",
+        complex_input_domain="kspace",
+        complex_normalization="batchnorm",
+        complex_convolution="widely_linear",
+        complex_streams="dual",
+        complex_interaction="holographic",
+        complex_activation="cardioid",
+    )
+
+    assert run_label_from_config(config) == "cx_ksp_avg_cbn_wl_dual_holo_card"
+
+
+def test_complex_only_modulus_gate_configuration_is_rejected(tmp_path):
+    with pytest.raises(ValueError, match="requires dual streams"):
+        TrainConfig(
+            manifest=tmp_path / "manifest.csv",
+            runs_dir=tmp_path / "runs",
+            mode="complex",
+            complex_streams="complex_only",
+            complex_interaction="modulus_gate",
+        )
+
+
 def test_gradient_accumulation_steps_final_partial_group():
     reference_model = torch.nn.Linear(2, 1)
     accumulated_model = torch.nn.Linear(2, 1)

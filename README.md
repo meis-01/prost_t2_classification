@@ -1,56 +1,60 @@
-# Real vs Complex-Pooling T2 Experiment
+# Full-factorial complex T2 experiment
 
-This branch contains the launch-ready, prepared-NPZ cluster experiment for a
-paired four-model comparison:
+This branch contains a launch-ready CPU/Slurm experiment for prepared
+four-coil prostate T2 NPZ data. It retains the original real baseline and the
+three original complex pooling models, then expands the complex architecture
+into a fixed factorial grid.
 
-- a parameter-matched real CNN using four coil magnitudes;
-- a phase-equivariant complex CNN with magnitude-max pooling;
-- the same complex CNN with median-amplitude selection pooling; and
-- the same complex CNN with complex average pooling.
+## Experiment grid
 
-All complex variants use the same architecture outside the pooling operation.
-Median pooling selects the activation with median-ranked amplitude while
-retaining its full complex value and phase. Max pooling similarly retains the
-maximum-amplitude complex activation. Average pooling averages the real and
-imaginary components.
+The launcher runs one real baseline plus 480 complex configurations:
 
-The prespecified primary question remains whether complex/median improves test
-AUC relative to the real model. Complex/max and complex/average are retained as
-exploratory pooling ablations and are run under the same paired design.
+| Factor | Levels |
+|---|---|
+| Input domain | image, k-space |
+| Complex pooling | magnitude max, magnitude median, complex average |
+| Complex normalization | RMSNorm, complex BatchNorm |
+| Complex convolution | standard, widely-linear |
+| Activation | modReLU, magnitude-gated SiLU, CReLU, cardioid |
+| Streams and interaction | complex-only/none, complex-only/holographic, dual/none, dual/modulus-gate, dual/holographic |
+
+The Cartesian product is `2 x 3 x 2 x 2 x 4 x 5 = 480` valid complex
+configurations. Complex-only/modulus-gate is intentionally absent because a
+modulus gate requires a real magnitude stream.
+
+Channel widths are selected as a dependent variable for each architecture so
+its trainable scalar parameter count stays within 1% of the fixed real
+baseline. The selected widths and exact parameter count are written to every
+run's `config.json`.
+
+The original models keep these stable experiment keys and definitions:
+
+- `real`: real magnitude baseline;
+- `complex_max`: image/RMSNorm/standard/complex-only/none/modReLU with max pooling;
+- `complex_median`: the same model with median pooling;
+- `complex_average`: the same model with average pooling.
+
+All other keys encode their factors, for example
+`cx_ksp_avg_cbn_wl_dual_holo_card`.
 
 ## Prespecified design
 
-For each seed, all four models use the same dataset split, sampler seed,
-optimizer settings, maximum epoch count, early-stopping rule, and Slurm
-resource request. Each model resets all random-number generators to the seed
-before training.
-
-- Technical pilot: seed `10383`.
-- Confirmatory seeds: `24001` through `24020`.
-- The pilot gates the Slurm array but is excluded from confirmatory summaries.
-- Maximum epochs: 100 for every model; early-stopping patience: 8 epochs.
+- Technical pilot: seed `10383`, all 481 models.
+- Confirmatory phase: seeds `24001` through `24004`, all 481 models per seed.
+- Total seed count: five, including pilot seed `10383`.
+- Pilot results are excluded from confirmatory summaries.
+- Maximum epochs: 100; early-stopping patience: 8.
 - Batch size: 8; gradient accumulation: 4; effective batch size: 32.
 - AdamW learning rate: `1e-3`; weight decay: `1e-4`.
+- Validation balanced accuracy selects each model's classification threshold.
 
-The primary endpoint is the paired difference in test AUC:
-`complex_median - real`. Secondary endpoints are test average precision,
-balanced accuracy, sensitivity, and specificity. The max-vs-real and
-average-vs-real results are explicitly exploratory. The classification
-threshold is selected on validation balanced accuracy independently for every
-trained model. Best validation AUC and epoch are diagnostics, not test
-endpoints.
-
-For every complex variant, the phase-two summary reports paired differences
-against real, a 10,000-resample percentile bootstrap confidence interval, and
-wins/ties. The two-sided paired sign-flip test is reserved for the prespecified
-primary endpoint, complex/median minus real test AUC. With the default 20 seeds,
-that test is enumerated exactly. These intervals describe training-seed
-variability on the fixed test set; they are not confidence intervals for
-sampling new patients.
+The retained primary endpoint is the paired test-AUC difference
+`complex_median - real`. All other grid comparisons are exploratory. The
+summary reports paired differences, 10,000-resample percentile intervals, and
+wins/ties for every complex configuration. The exact paired sign-flip test is
+only run for the prespecified primary endpoint.
 
 ## Data
-
-Place the prepared dataset inside the clone:
 
 ```text
 data/
@@ -59,16 +63,18 @@ data/
     `-- *.npz
 ```
 
-Each NPZ must contain `image_complex` with shape `(4, height, width)`. Manifest
-paths are relative to `manifest.csv`. The manifest must contain `path`,
-`fastmri_pt_id`, `label`, `data_split`, and `channels`; every training,
-validation, and test split must contain both labels. Patient IDs must be
-disjoint across splits.
+Each NPZ must contain a complex `image_complex` array shaped `(4, H, W)`. The
+manifest requires `path`, `fastmri_pt_id`, `label`, `data_split`, and
+`channels`. Training, validation, and test must each contain both classes, and
+patient IDs must be disjoint across splits.
 
-## CECI/Lemaitre4 launch
+Image-domain complex inputs are phase-aligned and robustly magnitude-scaled.
+K-space inputs additionally receive a centered orthonormal 2-D FFT before
+scaling. Complex training inputs receive random global-phase augmentation.
 
-Clone or update the repository and check out the `exp` branch. Load an available
-Python 3.10, 3.11, or 3.12 module:
+## Cluster launch
+
+On a CECI login node, update the branch and load Python 3.10-3.12:
 
 ```bash
 git switch exp
@@ -77,82 +83,95 @@ ml spider Python
 ml load <selected-Python-module>
 ```
 
-Validate the branch, clean worktree, Python environment, CPU-only PyTorch,
-prepared data, and Slurm access:
+Run the preflight check. On its first run it creates the virtual environment
+and installs the pinned dependencies:
 
 ```bash
 bash scripts/run_cluster_experiment.sh check
 ```
 
-Submit the complete experiment once:
+Submit the pilot, sequential per-seed arrays, and dependent summary:
 
 ```bash
 bash scripts/run_cluster_experiment.sh submit
 ```
 
-The default workflow requests the `work` partition, 16 CPUs, 32 GB RAM, and 48
-hours per model job, matching Lemaitre4's maximum job duration. Each seed/model
-combination is a separate array task so the four variants do not share one
-wall-time budget. Phase one is a four-task technical-pilot array. Only if every
-pilot model succeeds, phase two submits 20 seeds x 4 models (80 array tasks),
-with at most eight tasks running concurrently. A dependent summary job runs only
-after every phase-two task succeeds. NPZ inputs are staged to `$LOCALSCRATCH` by
-default.
+The default launch creates:
 
-Useful resource overrides can be supplied as environment variables:
+- one 481-task pilot array with no launcher-side concurrency cap;
+- 1,924 confirmatory tasks (`4 x 481`);
+- 2,405 training tasks across all five seeds;
+- exactly one 481-task array for each confirmatory seed;
+- seed arrays chained in order, so all tasks for seed `24001` reach a terminal
+  state before seed `24002` starts, continuing through seed `24004`;
+- one summary job after the final seed array.
+
+Every seed boundary, including the boundary after the pilot, uses `afterany`.
+An individual model exception is recorded as `FAILED`, but it does not block
+the remaining models in that array or any later seed. The summary also uses
+`afterany`; if runs are missing, it writes `PHASE2_INCOMPLETE` instead of
+`PHASE2_COMPLETE`. The preflight reads Slurm's `MaxArraySize` when available
+and verifies that a 481-task array is supported.
+
+By default, all 481 tasks in the active seed array are eligible to start at
+once. Slurm, partition, and account/QoS limits determine the actual number of
+simultaneous tasks. This uses the maximum cluster capacity available without
+violating seed-by-seed ordering. Set `MAX_PARALLEL` to a positive number only
+when a manual cap is desired; `MAX_PARALLEL=0` means unthrottled.
+
+Defaults can be overridden, for example:
 
 ```bash
-CPUS=20 MEMORY=48G TIME_LIMIT=96:00:00 MAX_PARALLEL=4 \
+CPUS=20 MEMORY=48G TIME_LIMIT=48:00:00 MAX_PARALLEL=0 \
   bash scripts/run_cluster_experiment.sh submit
 ```
 
-The launcher is intentionally fixed to one real run and the three complex
-pooling runs per seed. The model set and pooling methods are recorded in both
-submission and per-job metadata. `EPOCHS=100` is the default; early stopping can
-end a model before epoch 100 when validation performance stops improving.
+The checked-in defaults request the `work` partition, 16 CPUs, 32 GB per task,
+and 48 hours per task. Set `TIME_LIMIT` explicitly if the target partition has
+a different limit.
 
-## Outputs and monitoring
+## Outputs and recovery
 
 Persistent outputs default to:
 
 ```text
-$GLOBALSCRATCH/prost_t2_experiments/pooling_vs_real_v1
+$GLOBALSCRATCH/prost_t2_experiments/complex_full_factorial_v1
 ```
 
-The submission command prints the pilot, array, and summary job IDs. Monitor
-them with the printed `squeue` command and inspect `slurm/*.out` and
-`slurm/*.err`. A successful final aggregation writes:
+Submission provenance includes:
 
-- `metrics_by_seed.csv`: one row per seed and model;
-- `summary_by_model.csv`: mean and standard deviation by model;
-- `paired_deltas.csv`: seed-level differences for every complex pooling method
-  relative to real;
-- `paired_summary.csv`: confidence intervals and wins for all comparisons,
-  plus the primary median-vs-real sign-flip result;
-- `summary_metadata.json`: models, primary and exploratory comparisons,
-  endpoints, seeds, resampling count, and inference scope;
-- `configuration.txt`, `environment.txt`, and `modules.txt`: launch provenance;
-- `PHASE2_COMPLETE`: terminal success marker.
+- `model_grid.csv` and `model_grid.json`;
+- `configuration.txt`, `environment.txt`, and `modules.txt`;
+- `submission.txt` with every Slurm array and summary job ID.
 
-The launcher refuses to reuse an existing experiment directory. Set a new,
-descriptive `EXPERIMENT_NAME` for any intentional rerun.
-
-### Recover phase two after completed pilots
-
-If all four pilots produced complete run artifacts but an obsolete launcher
-caused Slurm to mark the pilot array failed, cancel the blocked phase-two and
-summary jobs, update the `exp` branch, and use the guarded recovery command:
+Check completed, failed, and pending task counts at any time:
 
 ```bash
-scancel OLD_PHASE2_JOB OLD_SUMMARY_JOB
-git pull --ff-only origin exp
-EXPERIMENT_ROOT=/absolute/path/to/the/existing/experiment \
+bash scripts/run_cluster_experiment.sh status
+```
+
+Each run lives under:
+
+```text
+phase1|phase2/seed_<seed>/models/<model-key>/attempt_<job>_<task>/
+```
+
+Successful attempts receive `SUCCESS` and their model directories receive
+`COMPLETE`. Failed attempts are retained with `FAILED`, so diagnostics are not
+overwritten.
+
+Final aggregation writes `metrics_by_seed.csv`, `summary_by_model.csv`,
+`paired_deltas.csv`, `paired_summary.csv`, `summary_metadata.json`, and
+`PHASE2_COMPLETE`.
+
+If phase two is interrupted, cancel any remaining original phase-two and
+summary jobs, then run:
+
+```bash
+EXPERIMENT_ROOT=/absolute/path/to/the/experiment \
   bash scripts/run_cluster_experiment.sh resume-phase2
 ```
 
-`resume-phase2` validates the original configuration and all four pilot
-`config.json`, `history.csv`, `threshold.json`, and `test_metrics.json` files.
-It refuses to run while the obsolete jobs are queued, when phase-two test
-results already exist, or after a prior recovery. It then submits only the
-20-seed, four-model phase-two array and its dependent summary job; the pilots
-are not rerun. The replacement job IDs are recorded in `phase2_resume.txt`.
+Recovery validates the original configuration, then resubmits the
+confirmatory grid. Workers skip existing `COMPLETE` model/seed directories and
+only rerun unfinished work. Pilot failures do not prevent phase-two recovery.

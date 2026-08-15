@@ -33,6 +33,28 @@ def build_parser() -> argparse.ArgumentParser:
         default="max",
         help="Intermediate pooling used by the complex model.",
     )
+    train_parser.add_argument(
+        "--complex-input-domain", choices=("image", "kspace"), default="image"
+    )
+    train_parser.add_argument(
+        "--complex-normalization", choices=("rms", "batchnorm"), default="rms"
+    )
+    train_parser.add_argument(
+        "--complex-convolution", choices=("standard", "widely_linear"), default="standard"
+    )
+    train_parser.add_argument(
+        "--complex-streams", choices=("complex_only", "dual"), default="complex_only"
+    )
+    train_parser.add_argument(
+        "--complex-interaction",
+        choices=("none", "modulus_gate", "holographic"),
+        default="none",
+    )
+    train_parser.add_argument(
+        "--complex-activation",
+        choices=("modrelu", "magnitude_silu", "crelu", "cardioid"),
+        default="modrelu",
+    )
     train_parser.set_defaults(func=cmd_train)
     return parser
 
@@ -61,6 +83,12 @@ def cmd_train(args: argparse.Namespace) -> int:
         "num_workers": args.num_workers,
         "device": args.device,
         "complex_pooling": args.complex_pooling,
+        "complex_input_domain": args.complex_input_domain,
+        "complex_normalization": args.complex_normalization,
+        "complex_convolution": args.complex_convolution,
+        "complex_streams": args.complex_streams,
+        "complex_interaction": args.complex_interaction,
+        "complex_activation": args.complex_activation,
     }
     if args.mode == "both":
         train_both_models(args.manifest, args.runs_dir, **common)

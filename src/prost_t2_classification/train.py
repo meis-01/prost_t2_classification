@@ -14,8 +14,17 @@ from torch import nn
 from tqdm import tqdm
 
 from .dataset import make_dataloaders
+from .experiment_grid import model_key_for_complex
 from .logging_utils import get_logger, timestamp_slug
-from .models import ComplexPooling, build_model
+from .models import (
+    ComplexActivation,
+    ComplexConvolution,
+    ComplexInteraction,
+    ComplexNormalization,
+    ComplexPooling,
+    ComplexStreams,
+    build_model,
+)
 
 
 Mode = Literal["real", "complex"]
@@ -36,6 +45,12 @@ class TrainConfig:
     num_workers: int = 0
     device: str | None = None
     complex_pooling: ComplexPooling = "max"
+    complex_input_domain: Literal["image", "kspace"] = "image"
+    complex_normalization: ComplexNormalization = "rms"
+    complex_convolution: ComplexConvolution = "standard"
+    complex_streams: ComplexStreams = "complex_only"
+    complex_interaction: ComplexInteraction = "none"
+    complex_activation: ComplexActivation = "modrelu"
 
     def __post_init__(self) -> None:
         if self.epochs < 1:
@@ -56,6 +71,22 @@ class TrainConfig:
             raise ValueError(f"Unknown model mode: {self.mode}")
         if self.complex_pooling not in ("max", "median", "average"):
             raise ValueError(f"Unknown complex pooling mode: {self.complex_pooling}")
+        if self.complex_input_domain not in ("image", "kspace"):
+            raise ValueError(f"Unknown complex input domain: {self.complex_input_domain}")
+        if self.complex_normalization not in ("rms", "batchnorm"):
+            raise ValueError(f"Unknown complex normalization: {self.complex_normalization}")
+        if self.complex_convolution not in ("standard", "widely_linear"):
+            raise ValueError(f"Unknown complex convolution: {self.complex_convolution}")
+        if self.complex_streams not in ("complex_only", "dual"):
+            raise ValueError(f"Unknown complex stream layout: {self.complex_streams}")
+        if self.complex_interaction not in ("none", "modulus_gate", "holographic"):
+            raise ValueError(f"Unknown complex interaction: {self.complex_interaction}")
+        if self.complex_activation not in ("modrelu", "magnitude_silu", "crelu", "cardioid"):
+            raise ValueError(f"Unknown complex activation: {self.complex_activation}")
+        if self.mode == "real" and self.complex_input_domain != "image":
+            raise ValueError("The real baseline is fixed to image-domain magnitude input")
+        if self.complex_streams == "complex_only" and self.complex_interaction == "modulus_gate":
+            raise ValueError("modulus_gate requires dual streams")
 
 
 def train_both_models(
@@ -79,11 +110,6 @@ def train_model(config: TrainConfig) -> Path:
     run_label = run_label_from_config(config)
     run_dir = config.runs_dir / f"{timestamp_slug()}_{run_label}"
     run_dir.mkdir(parents=True, exist_ok=True)
-    serializable_config = _serializable_config(config)
-    (run_dir / "config.json").write_text(
-        json.dumps(serializable_config, indent=2),
-        encoding="utf-8",
-    )
 
     device = torch.device(config.device or ("cuda" if torch.cuda.is_available() else "cpu"))
     logger.info("Training %s model on %s", run_label, device)
@@ -91,11 +117,25 @@ def train_model(config: TrainConfig) -> Path:
     loaders = make_dataloaders(
         config.manifest,
         mode=config.mode,
+        input_domain=config.complex_input_domain,
         batch_size=config.batch_size,
         num_workers=config.num_workers,
         seed=config.seed,
     )
-    model = build_model(config.mode, complex_pooling=config.complex_pooling).to(device)
+    model = build_model(
+        config.mode,
+        complex_pooling=config.complex_pooling,
+        complex_normalization=config.complex_normalization,
+        complex_convolution=config.complex_convolution,
+        complex_streams=config.complex_streams,
+        complex_interaction=config.complex_interaction,
+        complex_activation=config.complex_activation,
+    ).to(device)
+    serializable_config = _serializable_config(config, model=model)
+    (run_dir / "config.json").write_text(
+        json.dumps(serializable_config, indent=2),
+        encoding="utf-8",
+    )
     criterion = nn.BCEWithLogitsLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
 
@@ -222,9 +262,20 @@ def train_model(config: TrainConfig) -> Path:
 
 def run_label_from_config(config: TrainConfig) -> str:
     if config.mode == "complex":
-        if config.complex_pooling == "max":
+        model_key = model_key_for_complex(
+            input_domain=config.complex_input_domain,
+            pooling=config.complex_pooling,
+            normalization=config.complex_normalization,
+            convolution=config.complex_convolution,
+            streams=config.complex_streams,
+            interaction=config.complex_interaction,
+            activation=config.complex_activation,
+        )
+        if model_key == "complex_max":
             return "complex_modrelu"
-        return f"complex_modrelu_{config.complex_pooling}_pool"
+        if model_key in ("complex_median", "complex_average"):
+            return f"complex_modrelu_{config.complex_pooling}_pool"
+        return model_key
     return config.mode
 
 
@@ -408,10 +459,26 @@ def set_seed(seed: int) -> None:
     torch.backends.cudnn.benchmark = False
 
 
-def _serializable_config(config: TrainConfig) -> dict[str, object]:
+def _serializable_config(config: TrainConfig, *, model: nn.Module | None = None) -> dict[str, object]:
     data = asdict(config)
     data["manifest"] = str(config.manifest)
     data["runs_dir"] = str(config.runs_dir)
+    data["model_key"] = run_label_from_config(config) if config.mode == "real" else model_key_for_complex(
+        input_domain=config.complex_input_domain,
+        pooling=config.complex_pooling,
+        normalization=config.complex_normalization,
+        convolution=config.complex_convolution,
+        streams=config.complex_streams,
+        interaction=config.complex_interaction,
+        activation=config.complex_activation,
+    )
+    if model is not None:
+        data["trainable_parameters"] = sum(
+            parameter.numel() for parameter in model.parameters() if parameter.requires_grad
+        )
+        channels = getattr(model, "model_channels", None)
+        if channels is not None:
+            data["model_channels"] = list(channels)
     return data
 
 

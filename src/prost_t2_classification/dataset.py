@@ -9,11 +9,12 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 
-from .image_ops import align_multicoil_phase, scale_complex_by_magnitude
+from .image_ops import align_multicoil_phase, centered_fft2, scale_complex_by_magnitude
 from .labels import assert_patient_split_disjoint
 
 
 Mode = Literal["real", "complex"]
+InputDomain = Literal["image", "kspace"]
 
 
 class T2CoilNPZDataset(Dataset):
@@ -23,11 +24,13 @@ class T2CoilNPZDataset(Dataset):
         *,
         split: str,
         mode: Mode,
+        input_domain: InputDomain = "image",
         augment_global_phase: bool = False,
     ) -> None:
         self.manifest_path = Path(manifest_path)
         self.root = self.manifest_path.parent
         self.mode = mode
+        self.input_domain = input_domain
         self.augment_global_phase = augment_global_phase
 
         manifest = pd.read_csv(self.manifest_path)
@@ -58,6 +61,10 @@ class T2CoilNPZDataset(Dataset):
             raise ValueError(f"{sample_path} image_complex contains non-finite values.")
 
         image_complex = align_multicoil_phase(image_complex)
+        if self.input_domain == "kspace":
+            image_complex = centered_fft2(image_complex)
+        elif self.input_domain != "image":
+            raise ValueError(f"Unknown input domain: {self.input_domain}")
         image_complex = scale_complex_by_magnitude(image_complex, shared_scale=True)
         if self.mode == "complex" and self.augment_global_phase:
             phase = np.random.uniform(-np.pi, np.pi)
@@ -144,6 +151,7 @@ def make_dataloaders(
     manifest_path: Path,
     *,
     mode: Mode,
+    input_domain: InputDomain = "image",
     batch_size: int,
     num_workers: int,
     seed: int,
@@ -152,10 +160,15 @@ def make_dataloaders(
         manifest_path,
         split="training",
         mode=mode,
+        input_domain=input_domain,
         augment_global_phase=mode == "complex",
     )
-    val_ds = T2CoilNPZDataset(manifest_path, split="validation", mode=mode)
-    test_ds = T2CoilNPZDataset(manifest_path, split="test", mode=mode)
+    val_ds = T2CoilNPZDataset(
+        manifest_path, split="validation", mode=mode, input_domain=input_domain
+    )
+    test_ds = T2CoilNPZDataset(
+        manifest_path, split="test", mode=mode, input_domain=input_domain
+    )
 
     train_labels = train_ds.rows["label"].astype(int).to_numpy()
     positives = int(train_labels.sum())
