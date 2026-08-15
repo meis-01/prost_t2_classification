@@ -19,6 +19,9 @@ WIDELY_LINEAR_CHANNELS: tuple[int, int, int, int] = (23, 45, 91, 136)
 # Two reduced streams plus each 3x3 cross-stream gate approximately match the
 # scalar parameter count of the single-stream real and complex baselines.
 MODULUS_GATED_CHANNELS: tuple[int, int, int, int] = (24, 47, 95, 143)
+# The slightly narrower final block offsets the Q/K/V/output projections.
+HOLOGRAPHIC_CHANNELS: tuple[int, int, int, int] = (32, 64, 128, 188)
+HOLOGRAPHIC_ATTENTION_CHANNELS = 32
 # sqrt(2) times the complex widths. A real convolution at these widths has
 # approximately the same number of scalar weights as a complex convolution.
 PARAMETER_MATCHED_REAL_CHANNELS: tuple[int, int, int, int] = (45, 91, 181, 272)
@@ -286,6 +289,105 @@ class ModReLU(nn.Module):
         return x * scale
 
 
+class InterferenceAwareHolographicAttention2d(nn.Module):
+    """Complex self-attention with Hermitian similarity and amplitude penalty."""
+
+    def __init__(
+        self,
+        channels: int,
+        attention_channels: int,
+        *,
+        gamma: float = 1.0,
+    ) -> None:
+        super().__init__()
+        if attention_channels < 1:
+            raise ValueError("attention_channels must be positive")
+        if gamma < 0:
+            raise ValueError("gamma must be non-negative")
+        self.attention_channels = attention_channels
+        self.query = ComplexConv2d(
+            channels,
+            attention_channels,
+            kernel_size=1,
+            padding=0,
+        )
+        self.key = ComplexConv2d(
+            channels,
+            attention_channels,
+            kernel_size=1,
+            padding=0,
+        )
+        self.value = ComplexConv2d(
+            channels,
+            attention_channels,
+            kernel_size=1,
+            padding=0,
+        )
+        self.output = ComplexConv2d(
+            attention_channels,
+            channels,
+            kernel_size=1,
+            padding=0,
+        )
+        self.norm = ComplexRMSNorm2d(channels)
+        self.register_buffer("gamma", torch.tensor(float(gamma)))
+
+    def interference_logits(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+    ) -> torch.Tensor:
+        """Return corrected interference logits for ``(batch, tokens, channels)``."""
+        if not torch.is_complex(query) or not torch.is_complex(key):
+            raise TypeError("Holographic queries and keys must be complex")
+        if query.shape != key.shape or query.ndim != 3:
+            raise ValueError("Queries and keys must share shape (batch, tokens, channels)")
+        if query.shape[-1] != self.attention_channels:
+            raise ValueError("Query/key channel count does not match attention_channels")
+
+        scale = math.sqrt(self.attention_channels)
+        hermitian_similarity = torch.matmul(
+            query,
+            key.conj().transpose(-2, -1),
+        ).real / scale
+
+        query_magnitude = torch.abs(query)
+        key_magnitude = torch.abs(key)
+        query_power = query_magnitude.square().sum(dim=-1, keepdim=True)
+        key_power = key_magnitude.square().sum(dim=-1).unsqueeze(-2)
+        magnitude_cross = torch.matmul(
+            query_magnitude,
+            key_magnitude.transpose(-2, -1),
+        )
+        magnitude_distance = (
+            query_power + key_power - 2 * magnitude_cross
+        ).clamp_min(0) / self.attention_channels
+        return hermitian_similarity - self.gamma * magnitude_distance
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not torch.is_complex(x):
+            raise TypeError("InterferenceAwareHolographicAttention2d expects a complex tensor")
+        if x.ndim != 4:
+            raise ValueError("Holographic attention expects shape (batch, channels, height, width)")
+
+        batch, _, height, width = x.shape
+        query = self.query(x).flatten(2).transpose(1, 2)
+        key = self.key(x).flatten(2).transpose(1, 2)
+        value = self.value(x).flatten(2).transpose(1, 2)
+        attention = torch.softmax(self.interference_logits(query, key), dim=-1)
+        aggregated = torch.complex(
+            torch.matmul(attention, value.real),
+            torch.matmul(attention, value.imag),
+        )
+        aggregated = aggregated.transpose(1, 2).reshape(
+            batch,
+            self.attention_channels,
+            height,
+            width,
+        )
+        return self.norm(x + self.output(aggregated))
+
+
 class ComplexMagnitudeMaxPool2d(nn.Module):
     """Select the full complex value with maximum amplitude per pooling window."""
 
@@ -495,6 +597,30 @@ class WidelyLinearComplexT2CNN(ComplexT2CNN):
         )
 
 
+class HolographicAttentionT2CNN(ComplexT2CNN):
+    """RMS-normalized complex CNN with corrected holographic self-attention."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            pooling="average",
+            normalization="rms",
+            channels=HOLOGRAPHIC_CHANNELS,
+        )
+        self.holographic_attention = InterferenceAwareHolographicAttention2d(
+            HOLOGRAPHIC_CHANNELS[2],
+            HOLOGRAPHIC_ATTENTION_CHANNELS,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.pool1(self.block1(x))
+        x = self.pool2(self.block2(x))
+        x = self.pool3(self.block3(x))
+        x = self.holographic_attention(x)
+        x = self.block4(x)
+        pooled = F.adaptive_avg_pool2d(torch.abs(x), 1).flatten(1)
+        return self.classifier(self.dropout(pooled)).squeeze(-1)
+
+
 class ModulusCrossStreamGate(nn.Module):
     """Generate a real-valued gate from the modulus of a complex feature map."""
 
@@ -610,6 +736,7 @@ def build_model(
         "complex_kspace_batchnorm",
         "complex_widely_linear",
         "complex_modulus_gated",
+        "complex_holographic_attention",
     ],
     *,
     complex_pooling: ComplexPooling = "max",
@@ -626,4 +753,6 @@ def build_model(
         return WidelyLinearComplexT2CNN()
     if mode == "complex_modulus_gated":
         return ModulusGatedT2CNN()
+    if mode == "complex_holographic_attention":
+        return HolographicAttentionT2CNN()
     raise ValueError(f"Unknown model mode: {mode}")

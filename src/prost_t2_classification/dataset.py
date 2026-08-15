@@ -20,6 +20,7 @@ Mode = Literal[
     "complex_kspace_batchnorm",
     "complex_widely_linear",
     "complex_modulus_gated",
+    "complex_holographic_attention",
 ]
 
 COMPLEX_MODES: tuple[Mode, ...] = (
@@ -28,6 +29,7 @@ COMPLEX_MODES: tuple[Mode, ...] = (
     "complex_kspace_batchnorm",
     "complex_widely_linear",
     "complex_modulus_gated",
+    "complex_holographic_attention",
 )
 KSPACE_MODES: tuple[Mode, ...] = (
     "complex_kspace",

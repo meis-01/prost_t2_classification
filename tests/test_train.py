@@ -109,6 +109,10 @@ def test_batchnorm_kspace_model_has_distinct_run_label(tmp_path):
             "complex_modulus_gated",
             "complex_modulus_gated_modrelu_average_pool_rmsnorm",
         ),
+        (
+            "complex_holographic_attention",
+            "complex_holographic_attention_modrelu_average_pool_rmsnorm",
+        ),
     ],
 )
 def test_specialized_complex_models_have_distinct_run_labels(
@@ -133,6 +137,7 @@ def test_specialized_complex_models_have_distinct_run_labels(
         "complex_kspace_batchnorm",
         "complex_widely_linear",
         "complex_modulus_gated",
+        "complex_holographic_attention",
     ],
 )
 def test_fixed_average_pool_models_reject_other_pooling(tmp_path, mode):

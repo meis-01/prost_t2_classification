@@ -10,6 +10,8 @@ from prost_t2_classification.models import (
     ComplexMagnitudeMaxPool2d,
     ComplexMagnitudeMedianPool2d,
     ComplexRMSNorm2d,
+    HolographicAttentionT2CNN,
+    InterferenceAwareHolographicAttention2d,
     ModulusCrossStreamGate,
     ModulusGatedT2CNN,
     ModReLU,
@@ -82,6 +84,41 @@ def test_modulus_cross_stream_gate_uses_bounded_real_modulus_gate():
     assert output.dtype == torch.float32
     assert output.shape == (1, 3, 8, 8)
     assert torch.allclose(output, torch.full_like(output, 0.5))
+
+
+def test_holographic_logits_keep_constructive_and_destructive_phase_distinct():
+    attention = InterferenceAwareHolographicAttention2d(1, 1, gamma=1.0)
+    query = torch.tensor([[[1.0 + 0.0j], [1.0 + 0.0j]]])
+    key = torch.tensor([[[1.0 + 0.0j], [-1.0 + 0.0j]]])
+
+    logits = attention.interference_logits(query, key)
+
+    expected = torch.tensor([[[1.0, -1.0], [1.0, -1.0]]])
+    assert torch.allclose(logits, expected)
+
+
+def test_holographic_logits_penalize_amplitude_mismatch_additively():
+    attention = InterferenceAwareHolographicAttention2d(1, 1, gamma=2.0)
+    query = torch.tensor([[[1.0 + 0.0j], [1.0 + 0.0j]]])
+    key = torch.tensor([[[1.0 + 0.0j], [2.0 + 0.0j]]])
+
+    logits = attention.interference_logits(query, key)
+
+    expected = torch.tensor([[[1.0, 0.0], [1.0, 0.0]]])
+    assert torch.allclose(logits, expected)
+
+
+def test_holographic_attention_is_global_phase_equivariant():
+    attention = InterferenceAwareHolographicAttention2d(4, 3)
+    attention.eval()
+    x = torch.complex(torch.randn(2, 4, 8, 8), torch.randn(2, 4, 8, 8))
+    rotation = torch.polar(torch.tensor(1.0), torch.tensor(0.731))
+
+    with torch.no_grad():
+        output = attention(x)
+        rotated_output = attention(x * rotation)
+
+    assert torch.allclose(rotated_output, output * rotation, atol=1e-5, rtol=1e-5)
 
 
 def test_complex_batch_norm_zero_centers_and_whitens_correlated_components():
@@ -250,6 +287,7 @@ def test_batchnorm_kspace_model_uses_complex_batch_norm_and_average_pooling():
     [
         ("complex_widely_linear", WidelyLinearComplexT2CNN),
         ("complex_modulus_gated", ModulusGatedT2CNN),
+        ("complex_holographic_attention", HolographicAttentionT2CNN),
     ],
 )
 def test_specialized_complex_models_build_with_matched_parameter_budget(
@@ -299,6 +337,34 @@ def test_modulus_gated_model_is_invariant_to_global_phase():
     model = build_model("complex_modulus_gated")
     model.eval()
     rotation = torch.polar(torch.tensor(1.0), torch.tensor(0.731))
+
+    with torch.no_grad():
+        output = model(x)
+        rotated_output = model(x * rotation)
+
+    assert torch.allclose(output, rotated_output, atol=1e-5, rtol=1e-5)
+
+
+def test_holographic_model_uses_average_pooling_and_rms_norm():
+    model = build_model("complex_holographic_attention")
+
+    assert all(
+        isinstance(pool, ComplexAveragePool2d)
+        for pool in (model.pool1, model.pool2, model.pool3)
+    )
+    assert all(
+        isinstance(norm, ComplexRMSNorm2d)
+        for block in (model.block1, model.block2, model.block3, model.block4)
+        for norm in (block.norm1, block.norm2)
+    )
+    assert isinstance(model.holographic_attention.norm, ComplexRMSNorm2d)
+
+
+def test_holographic_model_is_invariant_to_global_phase():
+    x = torch.complex(torch.randn(2, 4, 32, 32), torch.randn(2, 4, 32, 32))
+    model = build_model("complex_holographic_attention")
+    model.eval()
+    rotation = torch.polar(torch.tensor(1.0), torch.tensor(1.234))
 
     with torch.no_grad():
         output = model(x)

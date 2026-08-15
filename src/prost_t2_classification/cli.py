@@ -28,6 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
             "complex_kspace_batchnorm",
             "complex_widely_linear",
             "complex_modulus_gated",
+            "complex_holographic_attention",
             "both",
         ),
         default="both",
@@ -71,6 +72,7 @@ def cmd_train(args: argparse.Namespace) -> int:
             "complex_kspace_batchnorm",
             "complex_widely_linear",
             "complex_modulus_gated",
+            "complex_holographic_attention",
         )
         else args.complex_pooling
     )

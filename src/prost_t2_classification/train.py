@@ -25,6 +25,7 @@ Mode = Literal[
     "complex_kspace_batchnorm",
     "complex_widely_linear",
     "complex_modulus_gated",
+    "complex_holographic_attention",
 ]
 
 ALL_MODES: tuple[Mode, ...] = (
@@ -34,12 +35,14 @@ ALL_MODES: tuple[Mode, ...] = (
     "complex_kspace_batchnorm",
     "complex_widely_linear",
     "complex_modulus_gated",
+    "complex_holographic_attention",
 )
 FIXED_AVERAGE_POOL_MODES: tuple[Mode, ...] = (
     "complex_kspace",
     "complex_kspace_batchnorm",
     "complex_widely_linear",
     "complex_modulus_gated",
+    "complex_holographic_attention",
 )
 
 
@@ -245,6 +248,8 @@ def train_model(config: TrainConfig) -> Path:
 
 
 def run_label_from_config(config: TrainConfig) -> str:
+    if config.mode == "complex_holographic_attention":
+        return "complex_holographic_attention_modrelu_average_pool_rmsnorm"
     if config.mode == "complex_modulus_gated":
         return "complex_modulus_gated_modrelu_average_pool_rmsnorm"
     if config.mode == "complex_widely_linear":

@@ -7,6 +7,7 @@ Slurm or cluster scratch storage. It compares:
 - a phase-equivariant complex CNN using the same four complex coils;
 - a widely-linear complex CNN using both `z` and `conj(z)`;
 - a dual-stream model that gates real magnitude features from complex moduli;
+- an interference-aware complex CNN with holographic self-attention;
 - RMS- and complex-BatchNorm-normalized k-space classifiers.
 
 The model, paired-seed design, validation-threshold tuning, and result tables are
@@ -150,6 +151,30 @@ python -m prost_t2_classification train `
   --manifest data/manifest.csv `
   --runs-dir runs/modulus_gated_seed_10383 `
   --mode complex_modulus_gated `
+  --device cpu `
+  --epochs 20 `
+  --batch-size 2 `
+  --gradient-accumulation-steps 16 `
+  --seed 10383
+```
+
+The holographic-attention model uses bias-free complex Q/K/V projections after
+the third average-pooling stage. Its real attention logits combine Hermitian
+phase-sensitive similarity with an additive magnitude-mismatch penalty:
+
+```text
+logit(i,j) = Re(q_i k_j^H) / sqrt(d) - gamma * ||abs(q_i) - abs(k_j)||^2 / d
+```
+
+Softmax weights aggregate complex values before a bias-free output projection,
+residual connection, and RMS normalization. This preserves global-phase
+equivariance while distinguishing constructive from destructive phase matches:
+
+```powershell
+python -m prost_t2_classification train `
+  --manifest data/manifest.csv `
+  --runs-dir runs/holographic_attention_seed_10383 `
+  --mode complex_holographic_attention `
   --device cpu `
   --epochs 20 `
   --batch-size 2 `

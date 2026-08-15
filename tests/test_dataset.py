@@ -112,7 +112,12 @@ def test_kspace_mode_transforms_prepared_complex_images(tmp_path, mode):
 
 @pytest.mark.parametrize(
     "mode",
-    ["complex", "complex_widely_linear", "complex_modulus_gated"],
+    [
+        "complex",
+        "complex_widely_linear",
+        "complex_modulus_gated",
+        "complex_holographic_attention",
+    ],
 )
 def test_complex_image_modes_share_aligned_scaled_input(tmp_path, mode):
     manifest = _valid_manifest()
