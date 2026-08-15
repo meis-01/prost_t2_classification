@@ -21,7 +21,15 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--runs-dir", type=Path, required=True)
     train_parser.add_argument(
         "--mode",
-        choices=("real", "complex", "complex_kspace", "both"),
+        choices=(
+            "real",
+            "complex",
+            "complex_kspace",
+            "complex_kspace_batchnorm",
+            "complex_widely_linear",
+            "complex_modulus_gated",
+            "both",
+        ),
         default="both",
     )
     train_parser.add_argument("--epochs", type=int, default=20)
@@ -37,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--complex-pooling",
         choices=("max", "median", "average"),
         default="max",
-        help="Intermediate pooling used by the complex-image model; complex_kspace always uses average.",
+        help="Intermediate pooling for the standard complex-image model; specialized modes use average.",
     )
     train_parser.set_defaults(func=cmd_train)
     return parser
@@ -56,7 +64,16 @@ def main(argv: list[str] | None = None) -> int:
 def cmd_train(args: argparse.Namespace) -> int:
     from .train import TrainConfig, train_both_models, train_model
 
-    complex_pooling = "average" if args.mode == "complex_kspace" else args.complex_pooling
+    complex_pooling = (
+        "average"
+        if args.mode in (
+            "complex_kspace",
+            "complex_kspace_batchnorm",
+            "complex_widely_linear",
+            "complex_modulus_gated",
+        )
+        else args.complex_pooling
+    )
     common = {
         "epochs": args.epochs,
         "batch_size": args.batch_size,

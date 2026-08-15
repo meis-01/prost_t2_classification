@@ -13,7 +13,26 @@ from .image_ops import align_multicoil_phase, centered_fft2, scale_complex_by_ma
 from .labels import assert_patient_split_disjoint
 
 
-Mode = Literal["real", "complex", "complex_kspace"]
+Mode = Literal[
+    "real",
+    "complex",
+    "complex_kspace",
+    "complex_kspace_batchnorm",
+    "complex_widely_linear",
+    "complex_modulus_gated",
+]
+
+COMPLEX_MODES: tuple[Mode, ...] = (
+    "complex",
+    "complex_kspace",
+    "complex_kspace_batchnorm",
+    "complex_widely_linear",
+    "complex_modulus_gated",
+)
+KSPACE_MODES: tuple[Mode, ...] = (
+    "complex_kspace",
+    "complex_kspace_batchnorm",
+)
 
 
 class T2CoilNPZDataset(Dataset):
@@ -58,19 +77,19 @@ class T2CoilNPZDataset(Dataset):
             raise ValueError(f"{sample_path} image_complex contains non-finite values.")
 
         image_complex = align_multicoil_phase(image_complex)
-        if self.mode == "complex_kspace":
+        if self.mode in KSPACE_MODES:
             complex_input = centered_fft2(image_complex)
         else:
             complex_input = image_complex
         complex_input = scale_complex_by_magnitude(complex_input, shared_scale=True)
-        if self.mode in ("complex", "complex_kspace") and self.augment_global_phase:
+        if self.mode in COMPLEX_MODES and self.augment_global_phase:
             phase = np.random.uniform(-np.pi, np.pi)
             complex_input *= np.complex64(np.exp(1j * phase))
 
         if self.mode == "real":
             image = np.abs(complex_input).astype(np.float32)
             tensor = torch.from_numpy(image)
-        elif self.mode in ("complex", "complex_kspace"):
+        elif self.mode in COMPLEX_MODES:
             tensor = torch.from_numpy(complex_input)
         else:
             raise ValueError(f"Unknown mode: {self.mode}")
@@ -156,7 +175,7 @@ def make_dataloaders(
         manifest_path,
         split="training",
         mode=mode,
-        augment_global_phase=mode in ("complex", "complex_kspace"),
+        augment_global_phase=mode in COMPLEX_MODES,
     )
     val_ds = T2CoilNPZDataset(manifest_path, split="validation", mode=mode)
     test_ds = T2CoilNPZDataset(manifest_path, split="test", mode=mode)

@@ -18,7 +18,29 @@ from .logging_utils import get_logger, timestamp_slug
 from .models import ComplexPooling, build_model
 
 
-Mode = Literal["real", "complex", "complex_kspace"]
+Mode = Literal[
+    "real",
+    "complex",
+    "complex_kspace",
+    "complex_kspace_batchnorm",
+    "complex_widely_linear",
+    "complex_modulus_gated",
+]
+
+ALL_MODES: tuple[Mode, ...] = (
+    "real",
+    "complex",
+    "complex_kspace",
+    "complex_kspace_batchnorm",
+    "complex_widely_linear",
+    "complex_modulus_gated",
+)
+FIXED_AVERAGE_POOL_MODES: tuple[Mode, ...] = (
+    "complex_kspace",
+    "complex_kspace_batchnorm",
+    "complex_widely_linear",
+    "complex_modulus_gated",
+)
 
 
 @dataclass(frozen=True)
@@ -52,12 +74,12 @@ class TrainConfig:
             raise ValueError("patience must be at least 1.")
         if self.num_workers < 0:
             raise ValueError("num_workers must be non-negative.")
-        if self.mode not in ("real", "complex", "complex_kspace"):
+        if self.mode not in ALL_MODES:
             raise ValueError(f"Unknown model mode: {self.mode}")
         if self.complex_pooling not in ("max", "median", "average"):
             raise ValueError(f"Unknown complex pooling mode: {self.complex_pooling}")
-        if self.mode == "complex_kspace" and self.complex_pooling != "average":
-            raise ValueError("complex_kspace mode requires average complex pooling")
+        if self.mode in FIXED_AVERAGE_POOL_MODES and self.complex_pooling != "average":
+            raise ValueError(f"{self.mode} mode requires average complex pooling")
 
 
 def train_both_models(
@@ -223,6 +245,12 @@ def train_model(config: TrainConfig) -> Path:
 
 
 def run_label_from_config(config: TrainConfig) -> str:
+    if config.mode == "complex_modulus_gated":
+        return "complex_modulus_gated_modrelu_average_pool_rmsnorm"
+    if config.mode == "complex_widely_linear":
+        return "complex_widely_linear_modrelu_average_pool_rmsnorm"
+    if config.mode == "complex_kspace_batchnorm":
+        return "complex_kspace_batchnorm_modrelu_average_pool"
     if config.mode == "complex_kspace":
         return "complex_kspace_modrelu_average_pool"
     if config.mode == "complex":

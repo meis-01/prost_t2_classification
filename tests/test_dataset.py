@@ -80,7 +80,8 @@ def test_balanced_sampler_sequence_depends_only_on_experiment_seed(tmp_path):
     assert list(first.train.sampler) == list(second.train.sampler)
 
 
-def test_kspace_mode_transforms_prepared_complex_images(tmp_path):
+@pytest.mark.parametrize("mode", ["complex_kspace", "complex_kspace_batchnorm"])
+def test_kspace_mode_transforms_prepared_complex_images(tmp_path, mode):
     manifest = _valid_manifest()
     samples = tmp_path / "samples"
     samples.mkdir()
@@ -99,11 +100,44 @@ def test_kspace_mode_transforms_prepared_complex_images(tmp_path):
     dataset = T2CoilNPZDataset(
         manifest_path,
         split="training",
-        mode="complex_kspace",
+        mode=mode,
     )
     tensor, _ = dataset[0]
 
     expected = centered_fft2(align_multicoil_phase(images[dataset.rows.iloc[0]["path"]]))
+    expected = scale_complex_by_magnitude(expected, shared_scale=True)
+    assert tensor.dtype == torch.complex64
+    assert torch.allclose(tensor, torch.from_numpy(expected))
+
+
+@pytest.mark.parametrize(
+    "mode",
+    ["complex", "complex_widely_linear", "complex_modulus_gated"],
+)
+def test_complex_image_modes_share_aligned_scaled_input(tmp_path, mode):
+    manifest = _valid_manifest()
+    samples = tmp_path / "samples"
+    samples.mkdir()
+    rng = np.random.default_rng(73191)
+    images = {}
+    for row in manifest.itertuples():
+        image = (
+            rng.standard_normal((4, 8, 8))
+            + 1j * rng.standard_normal((4, 8, 8))
+        ).astype(np.complex64)
+        images[row.path] = image
+        np.savez_compressed(tmp_path / row.path, image_complex=image)
+    manifest_path = tmp_path / "manifest.csv"
+    manifest.to_csv(manifest_path, index=False)
+
+    dataset = T2CoilNPZDataset(
+        manifest_path,
+        split="training",
+        mode=mode,
+    )
+    tensor, _ = dataset[0]
+
+    expected = align_multicoil_phase(images[dataset.rows.iloc[0]["path"]])
     expected = scale_complex_by_magnitude(expected, shared_scale=True)
     assert tensor.dtype == torch.complex64
     assert torch.allclose(tensor, torch.from_numpy(expected))

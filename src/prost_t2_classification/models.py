@@ -9,9 +9,16 @@ from torch.nn import functional as F
 
 
 ComplexPooling = Literal["max", "median", "average"]
+ComplexNormalization = Literal["rms", "batchnorm"]
 
 
 COMPLEX_CHANNELS: tuple[int, int, int, int] = (32, 64, 128, 192)
+# Widely-linear convolutions have twice as many scalar kernels as ordinary
+# complex convolutions, so 1/sqrt(2)-scaled widths preserve the model budget.
+WIDELY_LINEAR_CHANNELS: tuple[int, int, int, int] = (23, 45, 91, 136)
+# Two reduced streams plus each 3x3 cross-stream gate approximately match the
+# scalar parameter count of the single-stream real and complex baselines.
+MODULUS_GATED_CHANNELS: tuple[int, int, int, int] = (24, 47, 95, 143)
 # sqrt(2) times the complex widths. A real convolution at these widths has
 # approximately the same number of scalar weights as a complex convolution.
 PARAMETER_MATCHED_REAL_CHANNELS: tuple[int, int, int, int] = (45, 91, 181, 272)
@@ -81,6 +88,73 @@ class ComplexConv2d(nn.Module):
         return torch.complex(real, imag)
 
 
+class WidelyLinearComplexConv2d(nn.Module):
+    """Widely-linear convolution ``W1 * z + W2 * conj(z)`` without bias."""
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        *,
+        kernel_size: int = 3,
+        padding: int = 1,
+    ) -> None:
+        super().__init__()
+        self.direct_real = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            padding=padding,
+            bias=False,
+        )
+        self.direct_imag = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            padding=padding,
+            bias=False,
+        )
+        self.conjugate_real = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            padding=padding,
+            bias=False,
+        )
+        self.conjugate_imag = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            padding=padding,
+            bias=False,
+        )
+        with torch.no_grad():
+            for convolution in (
+                self.direct_real,
+                self.direct_imag,
+                self.conjugate_real,
+                self.conjugate_imag,
+            ):
+                convolution.weight.mul_(0.5)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not torch.is_complex(x):
+            x = torch.complex(x, torch.zeros_like(x))
+        real = (
+            self.direct_real(x.real)
+            - self.direct_imag(x.imag)
+            + self.conjugate_real(x.real)
+            + self.conjugate_imag(x.imag)
+        )
+        imag = (
+            self.direct_imag(x.real)
+            + self.direct_real(x.imag)
+            + self.conjugate_imag(x.real)
+            - self.conjugate_real(x.imag)
+        )
+        return torch.complex(real, imag)
+
+
 class ComplexRMSNorm2d(nn.Module):
     """Phase-equivariant channel normalization using complex RMS power."""
 
@@ -100,6 +174,103 @@ class ComplexRMSNorm2d(nn.Module):
             power = self.running_power
         scale = torch.exp(self.log_scale) * torch.rsqrt(power + self.eps)
         return x * scale.view(1, -1, 1, 1)
+
+
+class ComplexBatchNorm2d(nn.Module):
+    """Trabelsi-style complex batch normalization with 2x2 whitening.
+
+    Each complex channel is represented by its real and imaginary components.
+    The centered components are whitened by the inverse square root of their
+    2x2 covariance matrix, then transformed by a learned symmetric matrix and
+    complex shift.
+    """
+
+    def __init__(self, channels: int, *, eps: float = 1e-5, momentum: float = 0.1) -> None:
+        super().__init__()
+        initial_variance = 1 / math.sqrt(2)
+        self.gamma_rr = nn.Parameter(torch.full((channels,), initial_variance))
+        self.gamma_ii = nn.Parameter(torch.full((channels,), initial_variance))
+        self.gamma_ri = nn.Parameter(torch.zeros(channels))
+        self.beta_real = nn.Parameter(torch.zeros(channels))
+        self.beta_imag = nn.Parameter(torch.zeros(channels))
+
+        self.register_buffer("running_mean_real", torch.zeros(channels))
+        self.register_buffer("running_mean_imag", torch.zeros(channels))
+        self.register_buffer("running_covar_rr", torch.full((channels,), initial_variance))
+        self.register_buffer("running_covar_ii", torch.full((channels,), initial_variance))
+        self.register_buffer("running_covar_ri", torch.zeros(channels))
+        self.eps = eps
+        self.momentum = momentum
+
+    @staticmethod
+    def _view(values: torch.Tensor) -> torch.Tensor:
+        return values.view(1, -1, 1, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not torch.is_complex(x):
+            raise TypeError("ComplexBatchNorm2d expects a complex tensor")
+        if x.ndim != 4:
+            raise ValueError("ComplexBatchNorm2d expects a tensor with shape (batch, channels, height, width)")
+
+        reduction_dims = (0, 2, 3)
+        if self.training:
+            mean_real = x.real.mean(dim=reduction_dims)
+            mean_imag = x.imag.mean(dim=reduction_dims)
+            centered_real = x.real - self._view(mean_real)
+            centered_imag = x.imag - self._view(mean_imag)
+            covar_rr = centered_real.square().mean(dim=reduction_dims)
+            covar_ii = centered_imag.square().mean(dim=reduction_dims)
+            covar_ri = (centered_real * centered_imag).mean(dim=reduction_dims)
+            with torch.no_grad():
+                self.running_mean_real.lerp_(mean_real.detach(), self.momentum)
+                self.running_mean_imag.lerp_(mean_imag.detach(), self.momentum)
+                self.running_covar_rr.lerp_(covar_rr.detach(), self.momentum)
+                self.running_covar_ii.lerp_(covar_ii.detach(), self.momentum)
+                self.running_covar_ri.lerp_(covar_ri.detach(), self.momentum)
+        else:
+            mean_real = self.running_mean_real
+            mean_imag = self.running_mean_imag
+            covar_rr = self.running_covar_rr
+            covar_ii = self.running_covar_ii
+            covar_ri = self.running_covar_ri
+            centered_real = x.real - self._view(mean_real)
+            centered_imag = x.imag - self._view(mean_imag)
+
+        # Principal inverse square root of the regularized symmetric 2x2
+        # covariance matrix. This closed form avoids an eigendecomposition and
+        # remains differentiable when the two eigenvalues are nearly equal.
+        variance_rr = covar_rr + self.eps
+        variance_ii = covar_ii + self.eps
+        determinant = (variance_rr * variance_ii - covar_ri.square()).clamp_min(
+            self.eps**2
+        )
+        root_determinant = torch.sqrt(determinant)
+        root_trace = torch.sqrt(variance_rr + variance_ii + 2 * root_determinant)
+        inverse_scale = torch.reciprocal(root_determinant * root_trace)
+        whiten_rr = (variance_ii + root_determinant) * inverse_scale
+        whiten_ii = (variance_rr + root_determinant) * inverse_scale
+        whiten_ri = -covar_ri * inverse_scale
+
+        normalized_real = (
+            self._view(whiten_rr) * centered_real
+            + self._view(whiten_ri) * centered_imag
+        )
+        normalized_imag = (
+            self._view(whiten_ri) * centered_real
+            + self._view(whiten_ii) * centered_imag
+        )
+
+        output_real = (
+            self._view(self.gamma_rr) * normalized_real
+            + self._view(self.gamma_ri) * normalized_imag
+            + self._view(self.beta_real)
+        )
+        output_imag = (
+            self._view(self.gamma_ri) * normalized_real
+            + self._view(self.gamma_ii) * normalized_imag
+            + self._view(self.beta_imag)
+        )
+        return torch.complex(output_real, output_imag)
 
 
 class ModReLU(nn.Module):
@@ -218,13 +389,20 @@ def build_complex_pool(pooling: ComplexPooling) -> nn.Module:
 
 
 class ComplexBlock(nn.Module):
-    def __init__(self, in_channels: int, out_channels: int) -> None:
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        *,
+        normalization: ComplexNormalization = "rms",
+        convolution: type[nn.Module] = ComplexConv2d,
+    ) -> None:
         super().__init__()
-        self.conv1 = ComplexConv2d(in_channels, out_channels)
-        self.norm1 = ComplexRMSNorm2d(out_channels)
+        self.conv1 = convolution(in_channels, out_channels)
+        self.norm1 = _complex_norm(out_channels, normalization)
         self.act1 = ModReLU(out_channels)
-        self.conv2 = ComplexConv2d(out_channels, out_channels)
-        self.norm2 = ComplexRMSNorm2d(out_channels)
+        self.conv2 = convolution(out_channels, out_channels)
+        self.norm2 = _complex_norm(out_channels, normalization)
         self.act2 = ModReLU(out_channels)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -233,17 +411,52 @@ class ComplexBlock(nn.Module):
         return x
 
 
+def _complex_norm(channels: int, normalization: ComplexNormalization) -> nn.Module:
+    if normalization == "rms":
+        return ComplexRMSNorm2d(channels)
+    if normalization == "batchnorm":
+        return ComplexBatchNorm2d(channels)
+    raise ValueError(f"Unknown complex normalization: {normalization}")
+
+
 class ComplexT2CNN(nn.Module):
-    def __init__(self, *, pooling: ComplexPooling = "max") -> None:
+    def __init__(
+        self,
+        *,
+        pooling: ComplexPooling = "max",
+        normalization: ComplexNormalization = "rms",
+        channels: tuple[int, int, int, int] = COMPLEX_CHANNELS,
+        convolution: type[nn.Module] = ComplexConv2d,
+    ) -> None:
         super().__init__()
-        c1, c2, c3, c4 = COMPLEX_CHANNELS
-        self.block1 = ComplexBlock(4, c1)
+        c1, c2, c3, c4 = channels
+        self.block1 = ComplexBlock(
+            4,
+            c1,
+            normalization=normalization,
+            convolution=convolution,
+        )
         self.pool1 = build_complex_pool(pooling)
-        self.block2 = ComplexBlock(c1, c2)
+        self.block2 = ComplexBlock(
+            c1,
+            c2,
+            normalization=normalization,
+            convolution=convolution,
+        )
         self.pool2 = build_complex_pool(pooling)
-        self.block3 = ComplexBlock(c2, c3)
+        self.block3 = ComplexBlock(
+            c2,
+            c3,
+            normalization=normalization,
+            convolution=convolution,
+        )
         self.pool3 = build_complex_pool(pooling)
-        self.block4 = ComplexBlock(c3, c4)
+        self.block4 = ComplexBlock(
+            c3,
+            c4,
+            normalization=normalization,
+            convolution=convolution,
+        )
         self.dropout = nn.Dropout(0.2)
         self.classifier = nn.Linear(c4, 1)
 
@@ -263,8 +476,141 @@ class ComplexKSpaceCNN(ComplexT2CNN):
         super().__init__(pooling="average")
 
 
+class ComplexBatchNormKSpaceCNN(ComplexT2CNN):
+    """K-space classifier using Trabelsi-style complex batch normalization."""
+
+    def __init__(self) -> None:
+        super().__init__(pooling="average", normalization="batchnorm")
+
+
+class WidelyLinearComplexT2CNN(ComplexT2CNN):
+    """RMS-normalized widely-linear model with complex average pooling."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            pooling="average",
+            normalization="rms",
+            channels=WIDELY_LINEAR_CHANNELS,
+            convolution=WidelyLinearComplexConv2d,
+        )
+
+
+class ModulusCrossStreamGate(nn.Module):
+    """Generate a real-valued gate from the modulus of a complex feature map."""
+
+    def __init__(self, complex_channels: int, real_channels: int) -> None:
+        super().__init__()
+        self.convolution = nn.Conv2d(
+            complex_channels,
+            real_channels,
+            kernel_size=3,
+            padding=1,
+        )
+
+    def forward(self, complex_features: torch.Tensor) -> torch.Tensor:
+        if not torch.is_complex(complex_features):
+            raise TypeError("ModulusCrossStreamGate expects a complex tensor")
+        return torch.sigmoid(self.convolution(torch.abs(complex_features)))
+
+
+class ModulusGatedBlock(nn.Module):
+    """Update real and complex streams, then gate the real stream by |z|."""
+
+    def __init__(
+        self,
+        real_in_channels: int,
+        real_out_channels: int,
+        complex_in_channels: int,
+        complex_out_channels: int,
+    ) -> None:
+        super().__init__()
+        self.real_block = _real_block(real_in_channels, real_out_channels)
+        self.complex_block = ComplexBlock(
+            complex_in_channels,
+            complex_out_channels,
+            normalization="rms",
+        )
+        self.complex_to_real_gate = ModulusCrossStreamGate(
+            complex_out_channels,
+            real_out_channels,
+        )
+
+    def forward(
+        self,
+        real_features: torch.Tensor,
+        complex_features: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        real_features = self.real_block(real_features)
+        complex_features = self.complex_block(complex_features)
+        gate = self.complex_to_real_gate(complex_features)
+        return real_features * gate, complex_features
+
+
+class ModulusGatedT2CNN(nn.Module):
+    """Dual-stream model with complex-modulus gates on the real stream."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        r1, r2, r3, r4 = MODULUS_GATED_CHANNELS
+        c1, c2, c3, c4 = MODULUS_GATED_CHANNELS
+        self.block1 = ModulusGatedBlock(4, r1, 4, c1)
+        self.real_pool1 = nn.MaxPool2d(2)
+        self.complex_pool1 = ComplexAveragePool2d(2)
+        self.block2 = ModulusGatedBlock(r1, r2, c1, c2)
+        self.real_pool2 = nn.MaxPool2d(2)
+        self.complex_pool2 = ComplexAveragePool2d(2)
+        self.block3 = ModulusGatedBlock(r2, r3, c2, c3)
+        self.real_pool3 = nn.MaxPool2d(2)
+        self.complex_pool3 = ComplexAveragePool2d(2)
+        self.block4 = ModulusGatedBlock(r3, r4, c3, c4)
+        self.dropout = nn.Dropout(0.2)
+        self.classifier = nn.Linear(r4 + c4, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not torch.is_complex(x):
+            x = torch.complex(x, torch.zeros_like(x))
+        real_features = torch.abs(x)
+        complex_features = x
+        real_features, complex_features = self.block1(
+            real_features,
+            complex_features,
+        )
+        real_features = self.real_pool1(real_features)
+        complex_features = self.complex_pool1(complex_features)
+        real_features, complex_features = self.block2(
+            real_features,
+            complex_features,
+        )
+        real_features = self.real_pool2(real_features)
+        complex_features = self.complex_pool2(complex_features)
+        real_features, complex_features = self.block3(
+            real_features,
+            complex_features,
+        )
+        real_features = self.real_pool3(real_features)
+        complex_features = self.complex_pool3(complex_features)
+        real_features, complex_features = self.block4(
+            real_features,
+            complex_features,
+        )
+        real_pooled = F.adaptive_avg_pool2d(real_features, 1).flatten(1)
+        complex_pooled = F.adaptive_avg_pool2d(
+            torch.abs(complex_features),
+            1,
+        ).flatten(1)
+        pooled = torch.cat((real_pooled, complex_pooled), dim=1)
+        return self.classifier(self.dropout(pooled)).squeeze(-1)
+
+
 def build_model(
-    mode: Literal["real", "complex", "complex_kspace"],
+    mode: Literal[
+        "real",
+        "complex",
+        "complex_kspace",
+        "complex_kspace_batchnorm",
+        "complex_widely_linear",
+        "complex_modulus_gated",
+    ],
     *,
     complex_pooling: ComplexPooling = "max",
 ) -> nn.Module:
@@ -274,4 +620,10 @@ def build_model(
         return ComplexT2CNN(pooling=complex_pooling)
     if mode == "complex_kspace":
         return ComplexKSpaceCNN()
+    if mode == "complex_kspace_batchnorm":
+        return ComplexBatchNormKSpaceCNN()
+    if mode == "complex_widely_linear":
+        return WidelyLinearComplexT2CNN()
+    if mode == "complex_modulus_gated":
+        return ModulusGatedT2CNN()
     raise ValueError(f"Unknown model mode: {mode}")

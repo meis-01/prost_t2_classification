@@ -87,12 +87,60 @@ def test_kspace_model_has_distinct_average_pool_run_label(tmp_path):
     assert run_label_from_config(config) == "complex_kspace_modrelu_average_pool"
 
 
-def test_kspace_model_rejects_non_average_pooling(tmp_path):
+def test_batchnorm_kspace_model_has_distinct_run_label(tmp_path):
+    config = TrainConfig(
+        manifest=tmp_path / "manifest.csv",
+        runs_dir=tmp_path / "runs",
+        mode="complex_kspace_batchnorm",
+        complex_pooling="average",
+    )
+
+    assert run_label_from_config(config) == "complex_kspace_batchnorm_modrelu_average_pool"
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        (
+            "complex_widely_linear",
+            "complex_widely_linear_modrelu_average_pool_rmsnorm",
+        ),
+        (
+            "complex_modulus_gated",
+            "complex_modulus_gated_modrelu_average_pool_rmsnorm",
+        ),
+    ],
+)
+def test_specialized_complex_models_have_distinct_run_labels(
+    tmp_path,
+    mode,
+    expected,
+):
+    config = TrainConfig(
+        manifest=tmp_path / "manifest.csv",
+        runs_dir=tmp_path / "runs",
+        mode=mode,
+        complex_pooling="average",
+    )
+
+    assert run_label_from_config(config) == expected
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "complex_kspace",
+        "complex_kspace_batchnorm",
+        "complex_widely_linear",
+        "complex_modulus_gated",
+    ],
+)
+def test_fixed_average_pool_models_reject_other_pooling(tmp_path, mode):
     with pytest.raises(ValueError, match="requires average"):
         TrainConfig(
             manifest=tmp_path / "manifest.csv",
             runs_dir=tmp_path / "runs",
-            mode="complex_kspace",
+            mode=mode,
             complex_pooling="max",
         )
 

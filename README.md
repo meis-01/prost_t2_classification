@@ -4,7 +4,10 @@ This branch runs the prepared-NPZ real-vs-complex experiment locally, without
 Slurm or cluster scratch storage. It compares:
 
 - a parameter-matched real CNN using four coil magnitudes;
-- a phase-equivariant complex CNN using the same four complex coils.
+- a phase-equivariant complex CNN using the same four complex coils;
+- a widely-linear complex CNN using both `z` and `conj(z)`;
+- a dual-stream model that gates real magnitude features from complex moduli;
+- RMS- and complex-BatchNorm-normalized k-space classifiers.
 
 The model, paired-seed design, validation-threshold tuning, and result tables are
 the same as on `exp`. The local runner executes seeds sequentially, auto-selects
@@ -96,6 +99,62 @@ python -m prost_t2_classification train `
   --epochs 20 `
   --batch-size 2 `
   --gradient-accumulation-steps 16
+```
+
+A second k-space variant replaces complex RMS normalization with Trabelsi-style
+complex batch normalization. Each channel is zero-centered, its real and
+imaginary components are whitened by the inverse square root of their `2 x 2`
+covariance matrix, and a learned symmetric affine transform and complex shift
+are applied:
+
+```powershell
+python -m prost_t2_classification train `
+  --manifest data/manifest.csv `
+  --runs-dir runs/kspace_batchnorm_seed_10383 `
+  --mode complex_kspace_batchnorm `
+  --device cpu `
+  --epochs 20 `
+  --batch-size 2 `
+  --gradient-accumulation-steps 16 `
+  --seed 10383
+```
+
+## Additional complex-image models
+
+The widely-linear model replaces every complex convolution with
+`W1 * z + W2 * conj(z)`. It uses complex RMS normalization and complex average
+pooling throughout. Its reduced channel widths compensate for the second set of
+complex kernels, keeping its scalar parameter count matched to the baselines:
+
+```powershell
+python -m prost_t2_classification train `
+  --manifest data/manifest.csv `
+  --runs-dir runs/widely_linear_seed_10383 `
+  --mode complex_widely_linear `
+  --device cpu `
+  --epochs 20 `
+  --batch-size 2 `
+  --gradient-accumulation-steps 16 `
+  --seed 10383
+```
+
+The modulus-gated model maintains parallel real-magnitude and complex streams.
+After each block, it computes `sigmoid(Wconv * abs(z))` from the complex stream
+and multiplies that gate into the real stream. The complex stream uses RMS
+normalization and average pooling; the real stream uses BatchNorm and max
+pooling. Both streams are width-adjusted to preserve the baseline parameter
+budget:
+
+```powershell
+python -m prost_t2_classification train `
+  --manifest data/manifest.csv `
+  --runs-dir runs/modulus_gated_seed_10383 `
+  --mode complex_modulus_gated `
+  --device cpu `
+  --epochs 20 `
+  --batch-size 2 `
+  --gradient-accumulation-steps 16 `
+  --seed 10383
 ```
 
 ## Resume and results
