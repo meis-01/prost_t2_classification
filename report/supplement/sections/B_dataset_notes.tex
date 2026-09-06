@@ -22,6 +22,26 @@ Interpretation & Controlled T2 slice-classification experiment & Not evaluated h
 \end{tabularx}
 \end{table*}
 
+\begin{table*}[t]
+\centering
+\caption{Definition of the supervised classification task and evaluation units.}
+\label{tab:task-definition}
+\scriptsize
+\begin{tabularx}{\textwidth}{L{3.1cm}L{4.3cm}X}
+\toprule
+Item & Definition in this study & Consequence for interpretation \\
+\midrule
+Input sample & One prepared axial T2-weighted slice with four selected coil channels & Metrics are slice-level, not exam-level or patient-level diagnostic accuracy \\
+Negative class & PI-RADS 1--2 & Low radiological suspicion group \\
+Positive class & PI-RADS 3--5 & Intermediate-to-very-high radiological suspicion group; not a histopathology endpoint \\
+Split unit & Patient identifier & All slices from one patient remain in only one of training, validation, or test \\
+Training imbalance handling & Weighted random sampler with equal total class sampling mass & Optimization sees positives more frequently; validation/test prevalence remains unchanged \\
+Checkpoint selection & Maximum validation AUC & Test labels do not select the epoch \\
+Operating threshold & Maximum validation balanced accuracy & Threshold-dependent test metrics use a validation-selected cutoff \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
 \subsection{Slice Labels and Patient Correlation}
 The source release assigns T2 and DWI labels on a slice-by-slice basis in isolation~\cite{Tibrewala2024FastMRIProstate}. This increases the number of supervised samples but means that adjacent slices from one patient are not independent observations. The present patient-disjoint partitioning prevents direct train/test leakage. Nevertheless, the reported AUC and AP remain slice-level metrics; confidence intervals that ignore within-patient clustering would understate finite-cohort uncertainty.
 

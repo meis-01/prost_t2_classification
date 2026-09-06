@@ -56,26 +56,6 @@ Total      & 270 & 8,225 & 7,778 & 447 & 5.43 \\
 \end{tabular}
 \end{table}
 
-\begin{table*}[t]
-\centering
-\caption{Definition of the supervised classification task and evaluation units.}
-\label{tab:task-definition}
-\scriptsize
-\begin{tabularx}{\textwidth}{L{3.1cm}L{4.3cm}X}
-\toprule
-Item & Definition in this study & Consequence for interpretation \\
-\midrule
-Input sample & One prepared axial T2-weighted slice with four selected coil channels & Metrics are slice-level, not exam-level or patient-level diagnostic accuracy \\
-Negative class & PI-RADS 1--2 & Low radiological suspicion group \\
-Positive class & PI-RADS 3--5 & Intermediate-to-very-high radiological suspicion group; not a histopathology endpoint \\
-Split unit & Patient identifier & All slices from one patient remain in only one of training, validation, or test \\
-Training imbalance handling & Weighted random sampler with equal total class sampling mass & Optimization sees positives more frequently; validation/test prevalence remains unchanged \\
-Checkpoint selection & Maximum validation AUC & Test labels do not select the epoch \\
-Operating threshold & Maximum validation balanced accuracy & Threshold-dependent test metrics use a validation-selected cutoff \\
-\bottomrule
-\end{tabularx}
-\end{table*}
-
 \subsection{Complex Coil Representation and Phase Alignment}
 Let the four-coil complex image for one slice be
 \begin{align}
