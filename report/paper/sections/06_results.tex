@@ -56,21 +56,7 @@ The canonical comparison fixes image-domain input, ComplexRMSNorm2d (RMSNorm), s
 \endgroup
 
 \subsection{High-Performing Configurations}
-The maximum observed factorial AUC was \BestAUC with AP \BestAP for configuration \texttt{\BestLabel}. Table~\ref{tab:topconfigs} lists five high-AUC configurations and decodes their factor levels.
-
-\begin{table*}[t]
-\centering
-\caption{Five high-AUC configurations from the completed fixed-cohort factorial grid.}
-\label{tab:topconfigs}
-\scriptsize
-\begin{tabular}{rlccp{7.2cm}}
-\toprule
-Rank & Configuration & AUC & AP & Factor levels (domain / pooling / normalization / convolution / activation / stream--interaction) \\
-\midrule
-\TopTableRows
-\bottomrule
-\end{tabular}
-\end{table*}
+The maximum observed factorial AUC was \BestAUC with AP \BestAP for configuration \texttt{\BestLabel}. This is an exploratory maximum over the fixed 480-configuration grid evaluated on the same held-out test cohort, not an unbiased estimate of a selected final architecture.
 
 \subsection{Joint AUC--AP Landscape}
 
