@@ -1,0 +1,101 @@
+\documentclass[border=2pt]{standalone}
+
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage{pgfplotstable}
+\usepackage{caption}
+\pgfplotsset{compat=1.18}
+
+\definecolor{imageblue}{RGB}{41,93,135}
+\definecolor{fourierorange}{RGB}{181,108,48}
+\definecolor{referencegray}{RGB}{55,55,55}
+
+\begin{document}
+\begin{minipage}{3.45in}
+\centering
+\captionsetup{font=footnotesize,labelfont=bf,skip=3pt,width=\linewidth}
+
+% Configuration-level values and the reference AUC are read from the original
+% companion CSV; exact bin counts and densities are read from the compact table.
+\pgfplotstableread[col sep=comma]{figure_results_auc_landscape_data.csv}\configurationdata
+\pgfplotstablegetelem{0}{real_baseline_auc}\of\configurationdata
+\edef\baselineauc{\pgfplotsretval}
+\pgfplotstableread[col sep=comma]{figure_results_auc_landscape_histogram.csv}\histdata
+
+\begin{tikzpicture}
+\begin{axis}[
+    width=2.90in,
+    height=2.30in,
+    scale only axis,
+    xlabel={Test AUC},
+    ylabel={Density},
+    xmin=0.34,
+    xmax=0.82,
+    ymin=0,
+    ymax=12.0,
+    xtick={0.34,0.40,0.46,0.52,0.58,0.64,0.70,0.76,0.82},
+    ytick={0,2,4,6,8,10,12},
+    tick label style={font=\scriptsize},
+    label style={font=\footnotesize},
+    axis line style={draw=black!75,line width=0.35pt},
+    tick style={draw=black!75,line width=0.35pt},
+    y grid style={draw=black!12,line width=0.25pt},
+    grid=major,
+    legend style={
+      font=\scriptsize,
+      draw=none,
+      fill=white,
+      fill opacity=0.92,
+      text opacity=1,
+      at={(0.02,0.98)},
+      anchor=north west,
+      inner sep=1.5pt,
+      row sep=0pt,
+      column sep=2pt,
+    },
+    legend cell align=left,
+    clip=false,
+]
+
+% Both domains use the same 0.02-AUC bin edges; half-width bars are grouped
+% beside one another within each bin.
+\addplot+[
+    ybar,
+    mark=none,
+    bar width=0.0625in,
+    bar shift=-0.03125in,
+    draw=imageblue!85!black,
+    fill=imageblue!35!white,
+    fill opacity=1,
+    line width=0.35pt,
+    forget plot,
+] table[x=bin_center,y=image_density] {\histdata};
+\addlegendimage{area legend,draw=imageblue!85!black,fill=imageblue!35!white,fill opacity=1}
+\addlegendentry{Image domain}
+
+\addplot+[
+    ybar,
+    mark=none,
+    bar width=0.0625in,
+    bar shift=0.03125in,
+    draw=fourierorange!85!black,
+    fill=fourierorange!35!white,
+    fill opacity=1,
+    line width=0.35pt,
+    forget plot,
+] table[x=bin_center,y=fourier_density] {\histdata};
+\addlegendimage{area legend,draw=fourierorange!85!black,fill=fourierorange!35!white,fill opacity=1}
+\addlegendentry{Fourier domain}
+
+% Fixed real magnitude reference.
+\addplot[referencegray,dashed,line width=1.2pt]
+  coordinates {(\baselineauc,0) (\baselineauc,12)};
+\addlegendimage{referencegray,dashed,line width=1.2pt}
+\addlegendentry{Real magnitude baseline}
+
+\end{axis}
+\end{tikzpicture}
+
+\captionof{figure}{Distribution of test AUC across the 480 complex-valued configurations. Image-domain and Fourier-domain configurations are shown using identical histogram bins; the dashed vertical line denotes the fixed real magnitude baseline.}
+\end{minipage}
+\end{document}

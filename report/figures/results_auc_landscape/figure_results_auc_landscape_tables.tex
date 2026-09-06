@@ -1,0 +1,40 @@
+% Requires: \usepackage{booktabs}
+
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{3pt}
+\caption{Descriptive summary of test AUC for the observed image-domain and Fourier-domain complex configurations. Percentages count configurations exceeding the fixed real magnitude baseline (AUC $=0.7268$).}
+\label{tab:results_auc_landscape_summary}
+\begin{tabular}{lrrrrrrrr}
+\toprule
+Domain & $n$ & Mean & SD & Median & IQR & Min & Max & $>$ baseline, $n$ (\%) \\
+\midrule
+Image   & 240 & 0.7102 & 0.0665 & 0.7251 & 0.0740 & 0.3464 & 0.8162 & 116 (48.3) \\
+Fourier & 240 & 0.6377 & 0.0536 & 0.6384 & 0.0689 & 0.5037 & 0.7534 & 14  (5.8) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{5pt}
+\caption{Paired descriptive comparison of test AUC for matched image-domain and Fourier-domain configurations. Each pair holds pooling, normalization, convolution, activation, stream level, and interaction level fixed. The Wilcoxon signed-rank result and paired rank-biserial effect size are descriptive measures for the observed factorial pairs, not strong population inference.}
+\label{tab:results_auc_landscape_separation}
+\begin{tabular}{lr}
+\toprule
+Measure & Value \\
+\midrule
+Number of matched pairs & $240$ \\
+Mean paired $\Delta$AUC (image $-$ Fourier) & $+0.0725$ \\
+SD of paired $\Delta$AUC & $0.0877$ \\
+Median paired $\Delta$AUC & $+0.0852$ \\
+IQR of paired $\Delta$AUC & $0.1125$ \\
+$\Delta$AUC $>0$, $n$ (\%) & $196$ (81.7) \\
+Wilcoxon signed-rank statistic & $3471.5$ \\
+Wilcoxon $p$-value (two-sided) & $1.86\times10^{-24}$ \\
+Paired rank-biserial effect size & $+0.7599$ \\
+\bottomrule
+\end{tabular}
+\end{table}

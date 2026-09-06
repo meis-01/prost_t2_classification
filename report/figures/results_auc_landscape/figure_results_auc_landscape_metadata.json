@@ -1,0 +1,84 @@
+{
+  "figure": "figure_results_auc_landscape",
+  "source_csv": "results/test_metrics_all_runs.csv",
+  "source_filter": "phase == 'phase1' and metrics_available == True",
+  "counts": {
+    "plotted_complex_configurations": 480,
+    "image_domain": 240,
+    "fourier_domain": 240,
+    "real_baseline_rows": 1
+  },
+  "real_baseline_auc": 0.7268014932989552,
+  "histogram": {
+    "bin_width": 0.02,
+    "bin_edges": [
+      0.34,
+      0.36,
+      0.38,
+      0.4,
+      0.42,
+      0.44,
+      0.46,
+      0.48,
+      0.5,
+      0.52,
+      0.54,
+      0.56,
+      0.58,
+      0.6,
+      0.62,
+      0.64,
+      0.66,
+      0.68,
+      0.7,
+      0.72,
+      0.74,
+      0.76,
+      0.78,
+      0.8,
+      0.82
+    ],
+    "bin_convention": "left-inclusive, right-exclusive except the final bin, which is right-inclusive",
+    "density_definition": "count / (240 * bin_width)",
+    "bar_layout": "side-by-side grouped bars within each fixed bin",
+    "bar_fill_opacity": 1.0,
+    "baseline_line_width_pt": 1.2,
+    "histogram_csv": "figure_results_auc_landscape_histogram.csv"
+  },
+  "reproducibility": "The configuration-level CSV contains the exact 480 AUC values and factor fields. The compact histogram CSV contains the exact bin edges, counts, and densities used by PGFPlots.",
+  "table_summary": {
+    "raw_configuration_csv": "figure_results_auc_landscape_table_data.csv",
+    "summary_csv": "figure_results_auc_landscape_table_summary.csv",
+    "standard_deviation": "sample standard deviation (ddof=1)",
+    "quartiles": "linear percentile interpolation; IQR = Q3 - Q1",
+    "baseline_auc": 0.7268014932989552,
+    "comparison_conventions": {
+      "pairing_keys": [
+        "pooling",
+        "normalization",
+        "convolution",
+        "activation",
+        "stream_level",
+        "interaction_level"
+      ],
+      "pairing_description": "Each image-domain configuration is matched to the Fourier-domain configuration with identical pooling, normalization, convolution, activation, stream level, and interaction level.",
+      "wilcoxon": "scipy.stats.wilcoxon on paired image-minus-Fourier deltas; zero_method=wilcox, correction=False, alternative=two-sided, method=auto; reported statistic is the smaller signed-rank sum for the two-sided test.",
+      "paired_rank_biserial": "(W_plus - W_minus) / (W_plus + W_minus), positive for image-domain-favoring paired differences.",
+      "interpretation": "Descriptive paired separation measures for the observed factorial distributions, not strong population inference."
+    },
+    "comparison_results": {
+      "n_pairs": 240,
+      "mean_paired_delta_auc": 0.07254283834233072,
+      "sd_paired_delta_auc": 0.08766972057395782,
+      "median_paired_delta_auc": 0.08516638465877052,
+      "q1_paired_delta_auc": 0.01998563102624018,
+      "q3_paired_delta_auc": 0.13250342438159696,
+      "iqr_paired_delta_auc": 0.11251779335535678,
+      "delta_auc_gt_zero_n": 196,
+      "delta_auc_gt_zero_pct": 81.66666666666667,
+      "wilcoxon_signed_rank_statistic": 3471.5,
+      "wilcoxon_p_value_two_sided": 1.8630826011998336e-24,
+      "paired_rank_biserial_effect_size": 0.759923928077455
+    }
+  }
+}
