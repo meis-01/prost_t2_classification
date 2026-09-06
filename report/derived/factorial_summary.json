@@ -1,0 +1,31 @@
+{
+  "n_runs": 481,
+  "n_complex": 480,
+  "real_auc": 0.7268014932989552,
+  "complex_mean_auc": 0.6739691044682584,
+  "complex_mean_ap": 0.10547268693001802,
+  "complex_min_auc": 0.3464467005076142,
+  "complex_max_auc": 0.8162248542959203,
+  "complex_beating_real": 130,
+  "complex_beating_real_fraction": 0.2708333333333333,
+  "best_label": "cx_img_med_cbn_std_single_holo_card",
+  "best_auc": 0.8162248542959203,
+  "canonical": {
+    "real": {
+      "auc": 0.7268014932989552,
+      "ap": 0.1062820390900734
+    },
+    "complex_modrelu": {
+      "auc": 0.7527059329089786,
+      "ap": 0.147575201034088
+    },
+    "complex_modrelu_median_pool": {
+      "auc": 0.7283189643595734,
+      "ap": 0.0995178774089083
+    },
+    "complex_modrelu_average_pool": {
+      "auc": 0.715588322187307,
+      "ap": 0.1119096830630238
+    }
+  }
+}

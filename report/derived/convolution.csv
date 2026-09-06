@@ -1,0 +1,3 @@
+convolution,test_auc,test_average_precision
+standard,0.6770848161129465,0.10718432597931651
+widely_linear,0.6708533928235705,0.10376104788071956
