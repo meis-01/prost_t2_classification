@@ -39,32 +39,13 @@ The real magnitude baseline achieved test AUC $0.7268$. The complex grid contain
 \endgroup
 
 \subsection{Factor-Level Summaries and Selected Interactions}
-Table~\ref{tab:factorsummary} reports the formal factor-level AUC means. The stream/interaction rows use the implemented five-level combined factor; they are not separate independent stream and interaction factors.
+The marginal factor table reports descriptive means across the finite complex grid; its $\Delta$ column is mean AUC at that factor level minus the overall complex-grid mean AUC. Normalization shows a visible marginal contrast, with complex BatchNorm higher than RMSNorm, whereas convolution and activation contrasts are comparatively smaller. The interaction table retains the implemented five-level combined stream/interaction factor (complex-only/none, complex-only/holographic, dual/none, dual/modulus gate, and dual/holographic) rather than treating stream and interaction as separate independent factors. The stream/interaction pattern depends on domain, while the image/Fourier domain contrast remains the largest broad marginal separation. These summaries are descriptive properties of the observed factorial grid and do not establish a universal operator ranking.
 
-\begin{table*}[t]
-\centering
-\caption{Factor-level AUC summaries from the 480 complex configurations. The final column is the mean AUC minus the real-baseline AUC.}
-\label{tab:factorsummary}
-\scriptsize
-\begin{tabular}{llrrr}
-\toprule
-Factor & Level & Configurations & Mean AUC & Mean $\Delta$AUC vs. real \\
-\midrule
-\FactorTableRows
-\bottomrule
-\end{tabular}
-\end{table*}
-
-For normalization, complex BatchNorm averaged AUC \ImageBatchnormAUC in image space and \KspaceBatchnormAUC in Fourier space; RMSNorm averaged \ImageRmsAUC and \KspaceRmsAUC, respectively. For the five stream/interaction levels, the image-domain means were \ImageComplexOnlyNoneAUC (complex-only/none), \ImageComplexOnlyHolographicAUC (complex-only/holographic), \ImageDualNoneAUC (dual/none), \ImageDualModulusGateAUC (dual/modulus-gate), and \ImageDualHolographicAUC (dual/holographic). The corresponding Fourier-domain means were \KspaceComplexOnlyNoneAUC, \KspaceComplexOnlyHolographicAUC, \KspaceDualNoneAUC, \KspaceDualModulusGateAUC, and \KspaceDualHolographicAUC.
-
-Standard convolution averaged AUC \ConvStandardAUC versus \ConvWidelyLinearAUC for widely-linear convolution. The activation means were \ActModreluAUC for modReLU, \ActMagnitudeSiluAUC for magnitude-gated SiLU, \ActCreluAUC for CReLU, and \ActCardioidAUC for cardioid.
-
-\begin{figure*}[!t]
-\centering
-\blankfigure[3.5cm]
-\caption{Factor-level test-AUC summaries together with input-domain-by-normalization and input-domain-by-stream/interaction summaries.}
-\label{fig:effects}
-\end{figure*}
+\begingroup
+\renewenvironment{table}{\begin{table*}}{\end{table*}}
+\input{../figures/results_factor_effects/figure_factor_effects_table.tex}
+\input{../figures/results_factor_effects/figure_factor_effects_interactions_table.tex}
+\endgroup
 
 \subsection{Canonical Pooling Ablation}
 The canonical architecture fixes image-domain input, RMSNorm, standard complex convolution, a complex-only stream, no interaction, and modReLU while varying the pooling rule. Table~\ref{tab:canonicalresults} reports the real baseline and the three canonical complex rows.
