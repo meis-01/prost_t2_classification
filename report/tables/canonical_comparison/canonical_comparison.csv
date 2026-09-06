@@ -1,0 +1,5 @@
+Model,AUC,Delta_AUC,AP,Delta_AP,Balanced_accuracy,Sensitivity,Specificity
+Real magnitude baseline,0.727,0.000,0.106,0.000,0.669,0.619,0.718
+Canonical max,0.753,0.026,0.148,0.041,0.720,0.841,0.598
+Canonical median,0.728,0.002,0.100,-0.007,0.690,0.825,0.555
+Canonical average,0.716,-0.011,0.112,0.006,0.584,0.413,0.755
