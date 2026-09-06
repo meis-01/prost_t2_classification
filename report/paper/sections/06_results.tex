@@ -25,13 +25,18 @@ Fourier-domain complex (mean) & \FourierAUC & \FourierAP \\
 
 \begin{figure}[!t]
 \centering
-\blankfigure[4.0cm]
-\caption{Distribution of test AUC for the 480 complex configurations grouped by image-domain and Fourier-domain input; the real-baseline AUC is included as a reference.}
-\label{fig:landscape}
+\includegraphics[width=\columnwidth]{../figures/results_auc_landscape/figure_auc_landscape_artwork.pdf}
+\caption{Distribution of test AUC across the 480 complex-valued configurations. Image-domain and Fourier-domain configurations are shown using identical histogram bins; the dashed vertical line denotes the fixed real magnitude baseline.}
+\label{fig:auc-landscape}
 \end{figure}
 
 \subsection{Input-Domain Summary}
-Image-domain complex models had mean AUC \ImageAUC and mean AP \ImageAP. Fourier-domain complex models had mean AUC \FourierAUC and mean AP \FourierAP. The input-domain factor contains 240 configurations in each level, so these means average over identical numbers of pooling, normalization, convolution, activation, and stream/interaction combinations.
+The real magnitude baseline achieved test AUC $0.7268$. The complex grid contains 480 configurations, split evenly between 240 image-domain and 240 Fourier-domain configurations. Image-domain complex models had mean AUC $0.7102$ and Fourier-domain complex models had mean AUC $0.6377$, giving the broadest observed separation between the two input domains. The matched domain comparison covers 240 architecture pairs; image-domain AUC exceeded Fourier-domain AUC in 196/240 pairs ($81.7\%$), with mean paired $\Delta$AUC (image minus Fourier) $+0.0725$ and median paired $\Delta$AUC $+0.0852$. These paired quantities, together with the Wilcoxon signed-rank statistic and rank-biserial effect size in the table, are descriptive properties of the finite factorial grid and are not interpreted as population-level inference.
+
+\begingroup
+\renewenvironment{table}{\begin{table*}}{\end{table*}}
+\input{../figures/results_auc_landscape/figure_results_auc_landscape_tables.tex}
+\endgroup
 
 \subsection{Factor-Level Summaries and Selected Interactions}
 Table~\ref{tab:factorsummary} reports the formal factor-level AUC means. The stream/interaction rows use the implemented five-level combined factor; they are not separate independent stream and interaction factors.
