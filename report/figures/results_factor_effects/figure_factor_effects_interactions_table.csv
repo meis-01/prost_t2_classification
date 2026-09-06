@@ -1,0 +1,15 @@
+interaction_type,domain,factor,level,n,mean_auc,sd_auc,median_auc,iqr_auc
+domain x normalization,Image,normalization,RMSNorm,120,0.695,0.079,0.714,0.086
+domain x normalization,Image,normalization,C-BatchNorm,120,0.725,0.046,0.734,0.056
+domain x normalization,Fourier,normalization,RMSNorm,120,0.631,0.056,0.623,0.075
+domain x normalization,Fourier,normalization,C-BatchNorm,120,0.645,0.050,0.648,0.058
+domain x stream/interaction,Image,stream/interaction,C-only / none,48,0.682,0.079,0.690,0.093
+domain x stream/interaction,Image,stream/interaction,C-only / holo,48,0.670,0.087,0.681,0.060
+domain x stream/interaction,Image,stream/interaction,Dual / none,48,0.741,0.033,0.748,0.032
+domain x stream/interaction,Image,stream/interaction,Dual / gate,48,0.725,0.044,0.732,0.048
+domain x stream/interaction,Image,stream/interaction,Dual / holo,48,0.734,0.039,0.740,0.050
+domain x stream/interaction,Fourier,stream/interaction,C-only / none,48,0.662,0.055,0.660,0.082
+domain x stream/interaction,Fourier,stream/interaction,C-only / holo,48,0.634,0.059,0.638,0.067
+domain x stream/interaction,Fourier,stream/interaction,Dual / none,48,0.617,0.045,0.615,0.070
+domain x stream/interaction,Fourier,stream/interaction,Dual / gate,48,0.656,0.050,0.656,0.077
+domain x stream/interaction,Fourier,stream/interaction,Dual / holo,48,0.620,0.044,0.619,0.053

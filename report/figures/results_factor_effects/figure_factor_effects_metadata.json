@@ -1,0 +1,40 @@
+{
+  "source_csv": "C:\\Users\\meisa\\Projects\\prost_t2_classification\\results\\test_metrics_all_runs.csv",
+  "selection": "phase1 rows excluding the real baseline; 3 legacy complex rows mapped to their implemented image-domain RMSNorm/standard/complex-only-none cells",
+  "overall_complex_grid_mean_auc": "0.6739691045",
+  "cell_counts": {
+    "selected_complex_configurations": 480,
+    "domain_counts": {
+      "image": 240,
+      "fourier": 240
+    },
+    "normalization_by_domain": {
+      "image": {
+        "rms": 120,
+        "batchnorm": 120
+      },
+      "fourier": {
+        "rms": 120,
+        "batchnorm": 120
+      }
+    },
+    "stream_interaction_by_domain": {
+      "image": {
+        "complex-only / none": 48,
+        "complex-only / holographic": 48,
+        "dual / none": 48,
+        "dual / modulus gate": 48,
+        "dual / holographic": 48
+      },
+      "fourier": {
+        "complex-only / none": 48,
+        "complex-only / holographic": 48,
+        "dual / none": 48,
+        "dual / modulus gate": 48,
+        "dual / holographic": 48
+      }
+    }
+  },
+  "statistics": "mean, median, sample standard deviation (n-1), and linear-interpolated percentile IQR",
+  "figure_caption": "Descriptive factorial effects and selected interactions for test AUC. Panel A shows factor-level mean AUC contrasts relative to the overall complex-grid mean. Panels B and C show domain-by-normalization and domain-by-stream/interaction mean AUC, respectively, averaging over the remaining factorial dimensions."
+}

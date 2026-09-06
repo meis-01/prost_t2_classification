@@ -1,0 +1,30 @@
+% Requires \usepackage{booktabs}.
+\begin{table}[t]
+\centering
+\caption{Descriptive domain-by-factor interaction summaries of test AUC. Each cell averages over the remaining factorial dimensions.}
+\label{tab:factor-effects-interactions}
+\small
+\begin{tabular}{llrrrrr}
+\toprule
+Domain & Level & $n$ & Mean AUC & SD & Median & IQR \\
+\midrule
+\multicolumn{7}{l}{\textit{Domain $\times$ normalization}} \\
+Image & RMSNorm & 120 & 0.695 & 0.079 & 0.714 & 0.086 \\
+ & C-BatchNorm & 120 & 0.725 & 0.046 & 0.734 & 0.056 \\
+Fourier & RMSNorm & 120 & 0.631 & 0.056 & 0.623 & 0.075 \\
+ & C-BatchNorm & 120 & 0.645 & 0.050 & 0.648 & 0.058 \\
+\midrule
+\multicolumn{7}{l}{\textit{Domain $\times$ stream/interaction}} \\
+Image & C-only / none & 48 & 0.682 & 0.079 & 0.690 & 0.093 \\
+ & C-only / holo & 48 & 0.670 & 0.087 & 0.681 & 0.060 \\
+ & Dual / none & 48 & 0.741 & 0.033 & 0.748 & 0.032 \\
+ & Dual / gate & 48 & 0.725 & 0.044 & 0.732 & 0.048 \\
+ & Dual / holo & 48 & 0.734 & 0.039 & 0.740 & 0.050 \\
+Fourier & C-only / none & 48 & 0.662 & 0.055 & 0.660 & 0.082 \\
+ & C-only / holo & 48 & 0.634 & 0.059 & 0.638 & 0.067 \\
+ & Dual / none & 48 & 0.617 & 0.045 & 0.615 & 0.070 \\
+ & Dual / gate & 48 & 0.656 & 0.050 & 0.656 & 0.077 \\
+ & Dual / holo & 48 & 0.620 & 0.044 & 0.619 & 0.053 \\
+\bottomrule
+\end{tabular}
+\end{table}

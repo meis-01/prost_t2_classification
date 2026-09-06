@@ -1,0 +1,15 @@
+interaction_type,domain,factor,level,n,mean_auc,median_auc,std_auc,iqr_auc,plot_x_norm,plot_x_stream,image_plot_auc,fourier_plot_auc
+domain x normalization,image,normalization,RMSNorm,120,0.6953027220,0.7143998603,0.0794608257,0.0857404722,0,nan,0.6953027220,nan
+domain x normalization,image,normalization,complex BatchNorm,120,0.7251783252,0.7343955631,0.0460178505,0.0559248516,1,nan,0.7251783252,nan
+domain x normalization,fourier,normalization,RMSNorm,120,0.6306290790,0.6233247388,0.0562583809,0.0753028228,0,nan,nan,0.6306290790
+domain x normalization,fourier,normalization,complex BatchNorm,120,0.6447662916,0.6480474310,0.0500661067,0.0578015470,1,nan,nan,0.6447662916
+domain x stream/interaction,image,stream/interaction,complex-only / none,48,0.6817177190,0.6904896194,0.0785222202,0.0931868235,nan,0,0.6817177190,nan
+domain x stream/interaction,image,stream/interaction,complex-only / holographic,48,0.6702128880,0.6807536325,0.0870665380,0.0601482556,nan,1,0.6702128880,nan
+domain x stream/interaction,image,stream/interaction,dual / none,48,0.7409360200,0.7482005210,0.0327362845,0.0324040502,nan,2,0.7409360200,nan
+domain x stream/interaction,image,stream/interaction,dual / modulus gate,48,0.7246697878,0.7318037762,0.0444240240,0.0475418312,nan,3,0.7246697878,nan
+domain x stream/interaction,image,stream/interaction,dual / holographic,48,0.7336662034,0.7400088631,0.0386485953,0.0495494588,nan,4,0.7336662034,nan
+domain x stream/interaction,fourier,stream/interaction,complex-only / none,48,0.6615724794,0.6603819193,0.0548072136,0.0822791610,nan,0,nan,0.6615724794
+domain x stream/interaction,fourier,stream/interaction,complex-only / holographic,48,0.6342382765,0.6381972981,0.0590836182,0.0670809497,nan,1,nan,0.6342382765
+domain x stream/interaction,fourier,stream/interaction,dual / none,48,0.6166076073,0.6147033546,0.0446483563,0.0702401096,nan,2,nan,0.6166076073
+domain x stream/interaction,fourier,stream/interaction,dual / modulus gate,48,0.6558776265,0.6555004969,0.0495904934,0.0769377971,nan,3,nan,0.6558776265
+domain x stream/interaction,fourier,stream/interaction,dual / holographic,48,0.6201924368,0.6188394704,0.0443700086,0.0525676148,nan,4,nan,0.6201924368
