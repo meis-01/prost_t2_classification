@@ -90,7 +90,16 @@ Pooling over complex-valued features is nontrivial because $\mathbb{C}$ has no n
 All three operators are globally phase-equivariant when applied in isolation. The magnitude-ranked max and median rules are complex extensions defined by this implementation: the ordering is performed on $|z|$ and the selected full complex sample is returned. Their difference is how they summarize local structure: max selects an amplitude extreme, median selects a robust order statistic, and average preserves linearity but mixes local phases through the interference terms in Eq.~\eqref{eq:complex-average-coherence}.
 
 \subsection{Complex-Only Architecture}
-The complex-only model uses four complex blocks, each containing two complex convolutions, normalization, and activation. The first three blocks are followed by the selected complex pooling operator. After the third pooled block, the model optionally inserts holographic attention. The fourth block is followed by adaptive average pooling of the feature magnitudes, dropout, and a real linear classifier. The conversion from complex features to magnitudes therefore occurs only near the final readout.
+The complex-only model uses four complex blocks, each containing two complex convolutions, normalization, and activation.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{../figures/figure_complex_operators/figure4_artwork.pdf}
+\caption{Complex Block anatomy comprising two repeated complex convolution--normalization--activation sequences.}
+\label{fig:complex-block}
+\end{figure}
+
+The first three blocks are followed by the selected complex pooling operator. After the third pooled block, the model optionally inserts holographic attention. The fourth block is followed by adaptive average pooling of the feature magnitudes, dropout, and a real linear classifier. The conversion from complex features to magnitudes therefore occurs only near the final readout.
 
 \subsection{Dual-Stream Architecture}
 The dual-stream model initializes
