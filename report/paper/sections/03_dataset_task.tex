@@ -114,24 +114,25 @@ The first coil is used as the reference. Its global phase is anchored by a magni
 \end{equation}
 so that the applied offset is $e^{-i\arg\eta_c}$ when $|\eta_c|$ is numerically nonzero. Values outside $\Omega$ are set to zero.
 
-After alignment, one shared scale is computed from the 99th percentile of $|\mathbf{x}|$ across all coils and spatial locations,
+After alignment, let $\mathbf{x}_{\mathrm{aligned}}$ denote the resulting four-coil complex image. The representation is then selected before scaling:
+\begin{align}
+\mathbf{u}_{\mathrm{img}} &= \mathbf{x}_{\mathrm{aligned}},\\
+\mathbf{u}_{F} &= \mathcal{F}_{c}\{\mathbf{x}_{\mathrm{aligned}}\},
+\end{align}
+where $\mathcal{F}_{c}$ is the centered orthonormal two-dimensional FFT applied independently to each coil. For each selected domain $d\in\{\mathrm{img},F\}$, a separate sample-level scalar is computed from the complex-magnitude elements of that representation,
 \begin{equation}
-\tilde{\mathbf{x}}=\frac{\mathbf{x}}{q_{0.99}+\epsilon}.
-\label{eq:shared-scale}
+q_d=P_{99}\!\left(|\mathbf{u}_d|\right),\qquad
+\widetilde{\mathbf{u}}_d=\frac{\mathbf{u}_d}{q_d+\epsilon}.
+\label{eq:representation-scale}
 \end{equation}
-A single scalar is used for all coils and both Cartesian components. This preserves relative coil amplitudes and complex angles while limiting the influence of extreme magnitudes.
+The percentile is computed over all four coils and spatial locations and the resulting scalar is shared across those coils. Thus the image-domain and Fourier-domain representations have separate robust scaling scalars, each applied after its own representation has been selected.
 
 \subsection{Image-Domain and Fourier-Domain Inputs}
-The factorial grid includes two complex input domains. The image-domain branch uses $\tilde{\mathbf{x}}$ directly. The Fourier-domain branch applies a centered orthonormal two-dimensional FFT to each coil,
-\begin{equation}
-\tilde{X}_c=\mathrm{fftshift}\left(\mathrm{FFT}_2\left(\mathrm{ifftshift}(\tilde{x}_c)\right)\right),
-\label{eq:fft-input}
-\end{equation}
-with orthonormal normalization. The resulting tensor is scaled by the same shared-magnitude principle. Learning in image and Fourier coordinates has been studied extensively in MRI reconstruction; cross-domain designs such as KIKI-net explicitly alternate image- and k-space CNNs~\cite{Eo2018KIKINet}, and more recent work has examined how spatial versus k-space input changes the inductive bias of MRI segmentation networks~\cite{Gosche2024DomainInfluence}. In the present study the domain factor is deliberately simpler: the same prepared complex tensor is presented either in image coordinates or after a unitary FFT, without a reconstruction/data-consistency loop. This branch should therefore be described as an FFT-derived Fourier representation of the prepared complex images, not as untouched scanner raw k-space.
+The factorial grid includes two complex input domains. The image-domain branch receives $\widetilde{\mathbf{u}}_{\mathrm{img}}$, whereas the Fourier-domain branch receives $\widetilde{\mathbf{u}}_{F}$. Learning in image and Fourier coordinates has been studied extensively in MRI reconstruction; cross-domain designs such as KIKI-net explicitly alternate image- and k-space CNNs~\cite{Eo2018KIKINet}, and more recent work has examined how spatial versus k-space input changes the inductive bias of MRI segmentation networks~\cite{Gosche2024DomainInfluence}. In the present study the domain factor is deliberately simpler: the aligned complex image is presented either in image coordinates or as an FFT-derived Fourier-domain representation, without a reconstruction/data-consistency loop. This experimental input is therefore an FFT-derived Fourier-domain representation of the aligned complex images, not untouched scanner raw k-space.
 
 The real baseline receives
 \begin{equation}
-x_{\mathrm{real}}=|\tilde{\mathbf{x}}|\in\mathbb{R}^{4\times H\times W}.
+x_{\mathrm{real}}=|\widetilde{\mathbf{u}}_{\mathrm{img}}|\in\mathbb{R}^{4\times H\times W}.
 \label{eq:real-input}
 \end{equation}
 Thus the real baseline preserves coil-specific magnitudes but discards phase before feature learning.
