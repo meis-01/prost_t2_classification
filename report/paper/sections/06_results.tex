@@ -48,28 +48,12 @@ The marginal factor table reports descriptive means across the finite complex gr
 \endgroup
 
 \subsection{Canonical Pooling Ablation}
-The canonical architecture fixes image-domain input, RMSNorm, standard complex convolution, a complex-only stream, no interaction, and modReLU while varying the pooling rule. Table~\ref{tab:canonicalresults} reports the real baseline and the three canonical complex rows.
+The canonical comparison fixes image-domain input, ComplexRMSNorm2d (RMSNorm), standard complex convolution, a complex-only stream, no interaction, and modReLU. The three complex configurations differ only in the complex pooling operator: canonical max-pool, canonical median-pool, and canonical average-pool. Table~\ref{tab:canonical-comparison} reports these configurations together with the fixed real magnitude baseline for direct comparison.
 
-\begin{table}[t]
-\centering
-\caption{Canonical pooling comparison and threshold-dependent test metrics.}
-\label{tab:canonicalresults}
-\scriptsize
-\begin{tabular}{lccccc}
-\toprule
-Model & AUC & AP & Bal. acc. & Sens. & Spec. \\
-\midrule
-\CanonicalTableRows
-\bottomrule
-\end{tabular}
-\end{table}
-
-\begin{figure}[!t]
-\centering
-\blankfigure[3.5cm]
-\caption{Test AUC and average precision for the real baseline and the canonical max-, median-, and average-pooling complex models.}
-\label{fig:canonical}
-\end{figure}
+\begingroup
+\renewenvironment{table}{\begin{table*}}{\end{table*}}
+\input{../tables/canonical_comparison/canonical_comparison.tex}
+\endgroup
 
 \subsection{High-Performing Configurations}
 The maximum observed factorial AUC was \BestAUC with AP \BestAP for configuration \texttt{\BestLabel}. Table~\ref{tab:topconfigs} lists five high-AUC configurations and decodes their factor levels.
