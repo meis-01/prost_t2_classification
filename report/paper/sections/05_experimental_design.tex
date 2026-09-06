@@ -61,34 +61,6 @@ The pipeline records accuracy, balanced accuracy, sensitivity, specificity, prec
 
 For test scores $s_i$ and labels $y_i$, the ROC curve is obtained by varying the score threshold, and AUC summarizes the probability-ranking behavior across thresholds. AP summarizes the precision-recall curve and therefore reacts more strongly to false positives in an imbalanced test set. The paper does not convert either metric into a patient-level clinical claim.
 
-\begin{table}[t]
-\centering
-\caption{Fixed training and evaluation protocol.}
-\label{tab:protocol}
-\scriptsize
-\begin{tabular}{ll}
-\toprule
-Setting & Value \\
-\midrule
-Optimizer & AdamW \\
-Learning rate & $10^{-3}$ \\
-Weight decay & $10^{-4}$ \\
-Maximum epochs & 100 \\
-Batch size & 8 \\
-Gradient accumulation & 4 \\
-Effective batch size & 32 \\
-Early-stopping patience & 8 epochs \\
-Checkpoint criterion & Validation AUC \\
-Training imbalance control & Weighted random sampler \\
-Loss & BCE with logits \\
-Threshold selection & Max. validation balanced accuracy \\
-Dropout before classifier & 0.2 \\
-Random seed & 10383 \\
-Reported runs & 481 \\
-Main metric & Test AUC; AP emphasized \\
-\bottomrule
-\end{tabular}
-\end{table}
 
 \subsection{Descriptive Factorial Analysis}
 For each factor level, the study reports the finite-grid mean AUC and its difference from the fixed real baseline. Selected two-factor summaries are included when they clarify how a marginal pattern depends on input domain. These summaries use Eqs.~\eqref{eq:factor-effects} and are descriptive: they are averages over the implemented architecture grid, not random-effects estimates over a population of possible neural networks.
