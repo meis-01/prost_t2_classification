@@ -11,24 +11,7 @@ The choice of T2-weighted input is methodological rather than a claim that T2-we
 
 For the present complex-valued representation study, T2-weighted data offer four practical advantages. First, the T2 acquisition has direct multicoil complex measurements and a straightforward image-domain interpretation. Second, T2 contrast provides detailed anatomical structure and lesion morphology, making it a meaningful diagnostic substrate rather than a purely technical reconstruction target. Third, restricting the task to one sequence avoids conflating complex-network effects with multimodal fusion. Fourth, the diffusion branch in fastMRI Prostate includes EPI acquisition, multiple diffusion directions and $b$-values, matched-filter coil combination, and derived ADC/high-$b$ products~\cite{Tibrewala2024FastMRIProstate}; these additional operations would complicate attribution of any observed effect to the complex representation itself.
 
-Table~\ref{tab:t2-scope} summarizes the scope decision. The study should therefore be read as a controlled T2-weighted signal-representation experiment, not as a substitute for biparametric or multiparametric clinical prostate MRI.
-
-\begin{table*}[t]
-\centering
-\caption{Sequence-scope rationale for the present study.}
-\label{tab:t2-scope}
-\scriptsize
-\begin{tabularx}{\textwidth}{L{2.4cm}L{5.2cm}X}
-\toprule
-Aspect & T2-weighted branch & Diffusion branch in the public dataset \\
-\midrule
-Clinical information & Zonal anatomy, gland structure, lesion morphology, local extension features~\cite{Turkbey2019PIRADSv21} & Diffusion restriction represented through multiple $b$-values, ADC, and high-$b$-value contrasts \\
-Acquisition/\linebreak reconstruction path & Axial T2-weighted turbo-spin-echo with multicoil complex data & EPI diffusion acquisition with directions, repeated averages, gridding/reconstruction, and derived maps~\cite{Tibrewala2024FastMRIProstate} \\
-Reason for current scope & Provides a single-sequence complex input with clear image-domain anatomy and minimal modality-fusion confounding & Scientifically important but introduces additional sequence-specific transformations that are outside the present controlled comparison \\
-Interpretation & Controlled T2 slice-classification experiment & Not evaluated here; omission is a scope limitation rather than evidence against diffusion information \\
-\bottomrule
-\end{tabularx}
-\end{table*}
+The study should therefore be read as a controlled T2-weighted signal-representation experiment, not as a substitute for biparametric or multiparametric clinical prostate MRI.
 
 \subsection{Slice-Level PI-RADS Grouping and Binary Target}\label{sec:labels}
 A fellowship-trained radiologist assigned PI-RADS v2.1 labels to the released T2 and diffusion slices retrospectively for research purposes~\cite{Tibrewala2024FastMRIProstate}. Importantly, the source dataset labels T2 and DWI slices in isolation. This differs from routine clinical PI-RADS assessment, which integrates the full examination. The dataset creators provide slice-level labels partly to increase the number of supervised training examples, with the explicit caveat that neighboring slices from one patient are correlated~\cite{Tibrewala2024FastMRIProstate}.

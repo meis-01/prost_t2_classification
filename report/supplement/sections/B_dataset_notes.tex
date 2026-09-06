@@ -5,6 +5,23 @@
 \subsection{Relationship to the Public fastMRI Prostate Release}
 The public fastMRI Prostate dataset contains 312 patients and both T2-weighted and diffusion-weighted data~\cite{Tibrewala2024FastMRIProstate}. The present manifest contains 270 patients because it is a prepared experimental subset. All cohort counts in the main paper refer to this prepared manifest rather than to the full public release.
 
+\begin{table*}[t]
+\centering
+\caption{Sequence-scope rationale for the present study.}
+\label{tab:t2-scope}
+\scriptsize
+\begin{tabularx}{\textwidth}{L{2.4cm}L{5.2cm}X}
+\toprule
+Aspect & T2-weighted branch & Diffusion branch in the public dataset \\
+\midrule
+Clinical information & Zonal anatomy, gland structure, lesion morphology, local extension features~\cite{Turkbey2019PIRADSv21} & Diffusion restriction represented through multiple $b$-values, ADC, and high-$b$-value contrasts \\
+Acquisition/\linebreak reconstruction path & Axial T2-weighted turbo-spin-echo with multicoil complex data & EPI diffusion acquisition with directions, repeated averages, gridding/reconstruction, and derived maps~\cite{Tibrewala2024FastMRIProstate} \\
+Reason for current scope & Provides a single-sequence complex input with clear image-domain anatomy and minimal modality-fusion confounding & Scientifically important but introduces additional sequence-specific transformations that are outside the present controlled comparison \\
+Interpretation & Controlled T2 slice-classification experiment & Not evaluated here; omission is a scope limitation rather than evidence against diffusion information \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
 \subsection{Slice Labels and Patient Correlation}
 The source release assigns T2 and DWI labels on a slice-by-slice basis in isolation~\cite{Tibrewala2024FastMRIProstate}. This increases the number of supervised samples but means that adjacent slices from one patient are not independent observations. The present patient-disjoint partitioning prevents direct train/test leakage. Nevertheless, the reported AUC and AP remain slice-level metrics; confidence intervals that ignore within-patient clustering would understate finite-cohort uncertainty.
 
