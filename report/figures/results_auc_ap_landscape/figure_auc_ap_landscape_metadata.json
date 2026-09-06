@@ -1,0 +1,38 @@
+{
+  "figure": "figure_auc_ap_landscape",
+  "source_csv": "results/test_metrics_all_runs.csv",
+  "source_filter": "phase == 'phase1' and metrics_available == True; complex rows identified by run_label prefix complex_ or cx_, real baseline identified by run_label == 'real'",
+  "real_baseline_auc": 0.7268014932989552,
+  "real_baseline_ap": 0.10628203909007349,
+  "row_counts": {
+    "source_rows": 830,
+    "phase1_rows": 481,
+    "complex_configurations": 480,
+    "image_configurations": 240,
+    "fourier_configurations": 240,
+    "real_baseline_rows": 1
+  },
+  "plotting_conventions": {
+    "x_axis": "test_auc",
+    "y_axis": "test_ap (source column test_average_precision)",
+    "domain_encoding": "Image uses filled circles in blue; Fourier uses open triangles in orange",
+    "transparency": "Image opacity 0.52; Fourier opacity 0.70",
+    "marker_size": "small; Image mark size 1.35pt; Fourier mark size 1.55pt",
+    "coordinates": "actual metric coordinates only; no jitter",
+    "reference_lines": "vertical at exact real baseline AUC and horizontal at exact real baseline AP; dashed gray",
+    "legend": "placed above the plotting region; no configuration labels, regression lines, or quadrant labels",
+    "figure_width": "6.55in axis within 7.16in IEEE two-column canvas",
+    "caption": "Joint distribution of test AUC and average precision across the 480 complex-valued configurations. Image-domain and Fourier-domain configurations are distinguished by marker style; dashed reference lines denote the fixed real magnitude baseline in AUC and average precision."
+  },
+  "verification": {
+    "phase1_rows": 481,
+    "real_baseline_rows": 1,
+    "complex_rows": 480,
+    "image_rows": 240,
+    "fourier_rows": 240,
+    "unique_complex_config_ids": 480,
+    "missing_auc": 0,
+    "missing_ap": 0
+  },
+  "summary_interpretation": "Descriptive properties of the finite factorial grid; no population inference."
+}
