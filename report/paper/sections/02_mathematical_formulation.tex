@@ -1,0 +1,157 @@
+% =============================================================================
+\section{Mathematical and Information-Theoretic Formulation}\label{sec:math}
+% =============================================================================
+\subsection{Complex Representation, Magnitude Projection, and Information}
+Let $Z\in\mathbb{C}^{C\times H\times W}$ denote the prepared multicoil complex input and let $Y\in\{0,1\}$ denote the binary slice label. The magnitude-only representation is the deterministic map
+\begin{equation}
+\mathcal{M}(Z)=|Z|.
+\label{eq:magnitude-map}
+\end{equation}
+For any componentwise phase field $\Phi=(\phi_j)_j$,
+\begin{equation}
+\mathcal{M}\!\left(\mathrm{diag}(e^{i\phi_j})Z\right)=\mathcal{M}(Z).
+\end{equation}
+Thus magnitude identifies a large family of complex signals that differ only through local phase. Since $\mathcal{M}$ is deterministic, the data-processing inequality gives
+\begin{equation}
+I(Y;\mathcal{M}(Z))\le I(Y;Z),
+\label{eq:dpi}
+\end{equation}
+without asserting that the inequality is strict for this dataset. Equation~\eqref{eq:dpi} is therefore a statement about representational capacity, not evidence that phase must improve classification.
+
+The nuisance transformation explicitly targeted by the training procedure is much smaller than arbitrary componentwise phase modification. A common global rotation acts as
+\begin{equation}
+\rho_\alpha(Z)=e^{i\alpha}Z,\qquad \alpha\in[-\pi,\pi].
+\label{eq:u1-action}
+\end{equation}
+The diagnostic label should be unchanged under this transformation, motivating a model whose internal features may be equivariant while its final output is invariant.
+
+\subsection{Image and Fourier Domains as Unitary Coordinate Systems}
+Let $\mathcal{F}$ denote the centered orthonormal two-dimensional Fourier transform applied independently to each coil. Under orthonormal normalization,
+\begin{align}
+\|\mathcal{F}Z\|_2 &= \|Z\|_2,\\
+\langle \mathcal{F}Z,\mathcal{F}W\rangle &= \langle Z,W\rangle.
+\label{eq:parseval}
+\end{align}
+The Fourier transform is therefore unitary and invertible. It does not remove information from the prepared complex tensor. It does, however, alter the geometry presented to a finite convolutional network. A local convolution in image coordinates and a local convolution in Fourier coordinates impose different locality priors, even though the two inputs are related by an invertible transform. The input-domain factor consequently tests an architecture--representation interaction rather than an information-presence/absence contrast.
+
+The global phase action commutes with the Fourier transform,
+\begin{equation}
+\mathcal{F}(e^{i\alpha}Z)=e^{i\alpha}\mathcal{F}(Z),
+\end{equation}
+so global-rotation considerations apply in both domains.
+
+\subsection{Complex-Linear and Widely-Linear Operators}
+For $z=x+iy$ and $W=A+iB$, standard complex multiplication is equivalent to the constrained real-linear map
+\begin{equation}
+\begin{bmatrix}\Re(Wz)\\\Im(Wz)\end{bmatrix}
+=
+\begin{bmatrix}A&-B\\B&A\end{bmatrix}
+\begin{bmatrix}x\\y\end{bmatrix}.
+\label{eq:real-linear-complex}
+\end{equation}
+This block structure is the algebraic signature of complex linearity. Equivalently, a map $T$ is complex-linear when
+\begin{equation}
+T(iz)=iT(z).
+\label{eq:c-linear}
+\end{equation}
+A standard complex convolution therefore occupies a strict subset of all real-linear maps on the concatenated Cartesian components.
+
+A general widely-linear map is
+\begin{equation}
+T(z)=W_1z+W_2z^*.
+\label{eq:widely-linear-form}
+\end{equation}
+The conjugate pathway relaxes the complex-linearity constraint. In finite dimensions, any real-linear map between complex vector spaces can be written in this form. The special case $W_2=0$ recovers complex linearity. Under a global phase rotation,
+\begin{equation}
+T(e^{i\alpha}z)=e^{i\alpha}W_1z+e^{-i\alpha}W_2z^*,
+\end{equation}
+so a nonzero conjugate term is not generally $U(1)$-equivariant. The standard-versus-widely-linear factor therefore trades stronger symmetry structure for greater real-linear flexibility.
+
+\subsection{Phase-Compatible and Phase-Selective Nonlinearities}
+A pointwise nonlinearity $g:\mathbb{C}\rightarrow\mathbb{C}$ is globally phase-equivariant when
+\begin{equation}
+g(e^{i\alpha}z)=e^{i\alpha}g(z).
+\label{eq:activation-equivariance}
+\end{equation}
+Any gate of the form
+\begin{equation}
+g(z)=z\,\psi(|z|)
+\end{equation}
+with real-valued $\psi$ satisfies Eq.~\eqref{eq:activation-equivariance}. This includes modReLU away from the numerical stabilizer and the implemented magnitude-gated SiLU. By contrast, Cartesian ReLU treats the real and imaginary axes as privileged directions, and the cardioid activation explicitly uses $\arg z$ relative to the real axis. These alternatives therefore probe whether preserving a common rotational structure is useful or unnecessarily restrictive for the classification task.
+
+\subsection{Normalization as Geometry Control}
+The implemented complex RMS normalization uses channel power
+\begin{equation}
+p_c=\mathbb{E}_{b,u,v}\left[|z_{b,c,u,v}|^2\right]
+\end{equation}
+during training and a running estimate at evaluation. Its output is
+\begin{equation}
+\mathrm{RMS}(z_c)=z_c\exp(\ell_c)(p_c+\epsilon)^{-1/2}.
+\label{eq:rmsnorm-general}
+\end{equation}
+Because $p_c$ depends only on magnitude, a global rotation of $z_c$ leaves the scale unchanged, and the normalized output rotates with the input.
+
+Complex BatchNorm instead treats $(\Re z,\Im z)$ as a two-dimensional random vector. After centering, a covariance matrix
+\begin{equation}
+V_c=\begin{bmatrix}V_{rr}&V_{ri}\\V_{ri}&V_{ii}\end{bmatrix}
+\end{equation}
+is whitened and followed by a learned affine transformation. This operation can remove real-imaginary correlation and rescale anisotropic Cartesian statistics. In general, however, the learned whitening-plus-affine map need not commute with every global rotation. The normalization factor therefore compares a phase-compatible scalar power normalization against a more flexible covariance-aware Cartesian normalization.
+
+\subsection{Pooling and Local Phase Aggregation}
+For local complex activations $z_j=r_je^{i\phi_j}$, average pooling obeys
+\begin{equation}
+\left|\frac{1}{n}\sum_jr_je^{i\phi_j}\right|^2
+=\frac{1}{n^2}\left(\sum_jr_j^2+2\sum_{j<k}r_jr_k\cos(\phi_j-\phi_k)\right).
+\label{eq:complex-average-coherence}
+\end{equation}
+The cross terms show explicitly that the pooled magnitude depends on local relative phase. Average pooling is complex-linear and globally phase-equivariant, but it creates a new complex value through vector averaging.
+
+Magnitude-max and magnitude-median pooling follow a different mechanism. Their selection index is determined by $|z_j|$, which is invariant to global phase. The selected complex sample then rotates with the input. These operators preserve one observed phase rather than averaging several phases. The median operator additionally changes the amplitude statistic from an extreme value to a robust order statistic; with a $2\times2$ window the implementation selects the lower of the two middle amplitudes.
+
+\subsection{Streams and Interaction Operators}
+The complex-only model retains complex features until the final magnitude readout. A dual-stream model constructs a real magnitude branch in parallel with the complex branch. If $h_c(Z)$ denotes complex features and $h_r(|Z|)$ real features, the final classifier acts on a concatenation of the form
+\begin{equation}
+\left[\mathrm{GAP}\{h_r(|Z|)\},\;\mathrm{GAP}\{|h_c(Z)|\}\right].
+\end{equation}
+The dual architecture therefore tests complementarity between explicitly invariant magnitude features and features learned before magnitude projection.
+
+For modulus gating, the real branch is multiplied by
+\begin{equation}
+g_c(Z)=\sigma\!\left(K*|h_c(Z)|\right),
+\end{equation}
+which is insensitive to a common rotation of the complex features. The holographic module uses both a Hermitian similarity and a magnitude-distance penalty. For simultaneous rotation $q\mapsto e^{i\alpha}q$, $k\mapsto e^{i\alpha}k$,
+\begin{equation}
+\Re\{qk^H\}\quad\text{and}\quad\||q|-|k|\|_2^2
+\end{equation}
+are unchanged. If the projections themselves preserve the rotation, the attention weights are invariant and the value aggregation is equivariant. Widely-linear projections or phase-breaking normalizations/activations can relax this property, which is why the interaction factor must be interpreted jointly with the other architectural choices.
+
+\subsection{Finite-Grid Factorial Summaries}
+For a performance quantity $A$, let $\mathcal{G}$ denote the 480-model complex grid, let $N_{f,l}$ be the number of configurations at level $l$ of factor $f$, and let $N_{fg,l,m}$ be the number at joint levels $(l,m)$. We define
+\begin{align}
+\bar A&=\frac{1}{|\mathcal{G}|}\sum_{q\in\mathcal{G}}A_q,\\
+\bar A_f(l)&=\frac{1}{N_{f,l}}\sum_{q:f(q)=l}A_q,\qquad
+\delta_f(l)=\bar A_f(l)-\bar A,\\
+\bar A_{fg}(l,m)&=\frac{1}{N_{fg,l,m}}\sum_{q:f(q)=l,\,g(q)=m}A_q,\\
+\delta_{fg}(l,m)&=\bar A_{fg}(l,m)-\bar A-\delta_f(l)-\delta_g(m).
+\label{eq:factor-effects}
+\end{align}
+These are finite-grid descriptive summaries. They characterize the observed architecture surface; they are not population-level causal effects or multiple independent hypothesis tests.
+
+\begin{table*}[t]
+\centering
+\caption{Algebraic and analytic role of the six factorial dimensions.}
+\label{tab:factor-algebra}
+\scriptsize
+\begin{tabularx}{\textwidth}{L{2.1cm}L{3.1cm}L{5.0cm}X}
+\toprule
+Factor & Levels & Algebraic distinction & Analytic question represented in the grid \\
+\midrule
+Input domain & image; Fourier & Unitary coordinate change $Z\leftrightarrow\mathcal{F}Z$ & Does the CNN locality/aggregation prior align differently with image and frequency coordinates? \\
+Pooling & max; median; average & Order-statistic selection versus complex-linear vector averaging & Should downsampling preserve one observed complex activation or combine local phase through interference terms? \\
+Normalization & RMS; complex BatchNorm & Scalar power normalization versus $2\times2$ Cartesian whitening and affine remapping & Is rotation-compatible amplitude normalization sufficient, or is covariance adaptation beneficial? \\
+Convolution & standard; widely linear & $\mathbb{C}$-linear map versus general $\mathbb{R}$-linear map $W_1z+W_2z^*$ & Does conjugate flexibility help beyond the stronger complex-linearity constraint? \\
+Activation & modReLU; magnitude-SiLU; CReLU; cardioid & Phase-equivariant gates versus Cartesian or phase-selective nonlinearities & How much global-rotation structure should be preserved through nonlinear feature extraction? \\
+Stream/interaction & five implemented levels & Complex-only processing, invariant magnitude branch, modulus gate, or Hermitian/magnitude attention & Are magnitude and complex features complementary, and do explicit interactions improve fusion? \\
+\bottomrule
+\end{tabularx}
+\end{table*}

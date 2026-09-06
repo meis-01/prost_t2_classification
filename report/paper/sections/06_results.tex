@@ -1,0 +1,110 @@
+% =============================================================================
+\section{Results}\label{sec:results}
+% =============================================================================
+The completed result table contains one real baseline and 480 complex configurations. All values in this section are regenerated from the supplied experiment CSV. Because the same fixed patient test cohort is used for the entire architecture grid, the factor-level and top-configuration summaries are descriptive.
+
+\subsection{Overall Factorial Performance}
+The real magnitude baseline achieved test AUC \RealAUC and AP \RealAP. Across the 480 complex configurations, AUC ranged from \ComplexMinAUC to \BestAUC, with mean AUC \ComplexMeanAUC and mean AP \ComplexMeanAP. \ComplexWins/\ComplexTotal complex configurations exceeded the real-baseline AUC.
+
+\begin{table}[t]
+\centering
+\caption{Direct performance summary from the completed experiment CSV.}
+\label{tab:overall}
+\scriptsize
+\begin{tabular}{lcc}
+\toprule
+Summary & AUC & AP \\
+\midrule
+Real magnitude baseline & \RealAUC & \RealAP \\
+All complex configurations (mean) & \ComplexMeanAUC & \ComplexMeanAP \\
+Image-domain complex (mean) & \ImageAUC & \ImageAP \\
+Fourier-domain complex (mean) & \FourierAUC & \FourierAP \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[!t]
+\centering
+\blankfigure[4.0cm]
+\caption{Distribution of test AUC for the 480 complex configurations grouped by image-domain and Fourier-domain input; the real-baseline AUC is included as a reference.}
+\label{fig:landscape}
+\end{figure}
+
+\subsection{Input-Domain Summary}
+Image-domain complex models had mean AUC \ImageAUC and mean AP \ImageAP. Fourier-domain complex models had mean AUC \FourierAUC and mean AP \FourierAP. The input-domain factor contains 240 configurations in each level, so these means average over identical numbers of pooling, normalization, convolution, activation, and stream/interaction combinations.
+
+\subsection{Factor-Level Summaries and Selected Interactions}
+Table~\ref{tab:factorsummary} reports the formal factor-level AUC means. The stream/interaction rows use the implemented five-level combined factor; they are not separate independent stream and interaction factors.
+
+\begin{table*}[t]
+\centering
+\caption{Factor-level AUC summaries from the 480 complex configurations. The final column is the mean AUC minus the real-baseline AUC.}
+\label{tab:factorsummary}
+\scriptsize
+\begin{tabular}{llrrr}
+\toprule
+Factor & Level & Configurations & Mean AUC & Mean $\Delta$AUC vs. real \\
+\midrule
+\FactorTableRows
+\bottomrule
+\end{tabular}
+\end{table*}
+
+For normalization, complex BatchNorm averaged AUC \ImageBatchnormAUC in image space and \KspaceBatchnormAUC in Fourier space; RMSNorm averaged \ImageRmsAUC and \KspaceRmsAUC, respectively. For the five stream/interaction levels, the image-domain means were \ImageComplexOnlyNoneAUC (complex-only/none), \ImageComplexOnlyHolographicAUC (complex-only/holographic), \ImageDualNoneAUC (dual/none), \ImageDualModulusGateAUC (dual/modulus-gate), and \ImageDualHolographicAUC (dual/holographic). The corresponding Fourier-domain means were \KspaceComplexOnlyNoneAUC, \KspaceComplexOnlyHolographicAUC, \KspaceDualNoneAUC, \KspaceDualModulusGateAUC, and \KspaceDualHolographicAUC.
+
+Standard convolution averaged AUC \ConvStandardAUC versus \ConvWidelyLinearAUC for widely-linear convolution. The activation means were \ActModreluAUC for modReLU, \ActMagnitudeSiluAUC for magnitude-gated SiLU, \ActCreluAUC for CReLU, and \ActCardioidAUC for cardioid.
+
+\begin{figure*}[!t]
+\centering
+\blankfigure[3.5cm]
+\caption{Factor-level test-AUC summaries together with input-domain-by-normalization and input-domain-by-stream/interaction summaries.}
+\label{fig:effects}
+\end{figure*}
+
+\subsection{Canonical Pooling Ablation}
+The canonical architecture fixes image-domain input, RMSNorm, standard complex convolution, a complex-only stream, no interaction, and modReLU while varying the pooling rule. Table~\ref{tab:canonicalresults} reports the real baseline and the three canonical complex rows.
+
+\begin{table}[t]
+\centering
+\caption{Canonical pooling comparison and threshold-dependent test metrics.}
+\label{tab:canonicalresults}
+\scriptsize
+\begin{tabular}{lccccc}
+\toprule
+Model & AUC & AP & Bal. acc. & Sens. & Spec. \\
+\midrule
+\CanonicalTableRows
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[!t]
+\centering
+\blankfigure[3.5cm]
+\caption{Test AUC and average precision for the real baseline and the canonical max-, median-, and average-pooling complex models.}
+\label{fig:canonical}
+\end{figure}
+
+\subsection{High-Performing Configurations}
+The maximum observed factorial AUC was \BestAUC with AP \BestAP for configuration \texttt{\BestLabel}. Table~\ref{tab:topconfigs} lists five high-AUC configurations and decodes their factor levels.
+
+\begin{table*}[t]
+\centering
+\caption{Five high-AUC configurations from the completed fixed-cohort factorial grid.}
+\label{tab:topconfigs}
+\scriptsize
+\begin{tabular}{rlccp{7.2cm}}
+\toprule
+Rank & Configuration & AUC & AP & Factor levels (domain / pooling / normalization / streams / interaction / activation) \\
+\midrule
+\TopTableRows
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\begin{figure}[!t]
+\centering
+\blankfigure[4.0cm]
+\caption{Test AUC versus average precision for all complex configurations, with the real baseline, canonical models, and highest-AUC configuration marked.}
+\label{fig:aucap}
+\end{figure}

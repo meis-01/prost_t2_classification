@@ -1,0 +1,15 @@
+% =============================================================================
+\section{Additional Dataset and Evaluation Notes}\label{app:dataset}
+% =============================================================================
+% SUPPLEMENT-CANDIDATE: this appendix can be moved intact to supplementary material.
+\subsection{Relationship to the Public fastMRI Prostate Release}
+The public fastMRI Prostate dataset contains 312 patients and both T2-weighted and diffusion-weighted data~\cite{Tibrewala2024FastMRIProstate}. The present manifest contains 270 patients because it is a prepared experimental subset. All cohort counts in the main paper refer to this prepared manifest rather than to the full public release.
+
+\subsection{Slice Labels and Patient Correlation}
+The source release assigns T2 and DWI labels on a slice-by-slice basis in isolation~\cite{Tibrewala2024FastMRIProstate}. This increases the number of supervised samples but means that adjacent slices from one patient are not independent observations. The present patient-disjoint partitioning prevents direct train/test leakage. Nevertheless, the reported AUC and AP remain slice-level metrics; confidence intervals that ignore within-patient clustering would understate finite-cohort uncertainty.
+
+\subsection{Why Average Precision Is Reported}
+The test cohort contains 63 positive slices among 1,245 total slices, a prevalence of approximately 5.06\%. ROC AUC is useful for threshold-independent ranking but can remain high when positive predictive performance is modest in an imbalanced population. AP summarizes the precision-recall tradeoff over score thresholds and is therefore reported alongside AUC. Threshold-dependent sensitivity, specificity, balanced accuracy, precision, and F1 use the threshold selected only from validation data.
+
+\subsection{Scope of the Fourier-Domain Arm}
+The Fourier-domain complex input is generated from the already prepared and phase-aligned complex image using a centered orthonormal FFT. It is not a direct reload of the original scanner acquisition. Consequently, this arm isolates the effect of presenting an invertible Fourier coordinate representation to the same CNN family under the current preprocessing; it does not reproduce the full raw-data reconstruction pipeline of the source dataset.

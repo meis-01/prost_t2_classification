@@ -1,0 +1,142 @@
+% =============================================================================
+\section{Experimental Design}\label{sec:design}
+% =============================================================================
+\subsection{Exhaustive Factorial Grid}
+The complex architecture space is the Cartesian product
+\begin{equation}
+2\times3\times2\times2\times4\times5=480.
+\end{equation}
+The six factors are input domain, pooling, normalization, convolution, activation, and a five-level combined stream/interaction factor. The latter is treated as one factor because modulus gating is structurally defined only for dual-stream models. The factor choices are grounded in established lines of complex signal processing and CVNN design rather than being arbitrary hyperparameters; Table~\ref{tab:factor-literature} summarizes representative provenance. The valid implemented levels are listed in Table~\ref{tab:grid}.
+
+\begin{table*}[t]
+\centering
+\caption{Factors and levels in the 480-configuration complex-valued grid.}
+\label{tab:grid}
+\scriptsize
+\begin{tabularx}{\textwidth}{L{2.4cm}L{6.2cm}X}
+\toprule
+Factor & Levels & Controlled architectural question \\
+\midrule
+Input domain & image; Fourier & Coordinate system presented to the convolutional hierarchy \\
+Pooling & magnitude max; magnitude median; complex average & Local selection versus vector aggregation \\
+Normalization & complex RMSNorm; complex BatchNorm & Power scaling versus Cartesian whitening \\
+Convolution & standard; widely linear & Complex-linear constraint versus conjugate real-linear flexibility \\
+Activation & modReLU; magnitude-gated SiLU; CReLU; cardioid & Phase-equivariant, Cartesian, and phase-selective nonlinear behavior \\
+Stream/interaction & complex-only/none; complex-only/holographic; dual/none; dual/modulus-gate; dual/holographic & Complex-only processing versus magnitude/complex fusion with optional interaction \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+Three model keys---\texttt{complex\_max}, \texttt{complex\_median}, and \texttt{complex\_average}---correspond to the canonical image/RMSNorm/standard/complex-only/no-interaction/modReLU architecture with pooling varied. These keys provide a controlled pooling ablation inside the larger grid.
+
+
+\begin{table*}[t]
+\centering
+\caption{Representative literature motivating the factorial dimensions. Citations indicate prior introduction or discussion of the underlying design family; several exact operators used here are study-specific adaptations, as noted in Section~\ref{sec:models}.}
+\label{tab:factor-literature}
+\scriptsize
+\begin{tabularx}{\textwidth}{L{2.2cm}L{5.0cm}X}
+\toprule
+Factor & Representative literature & Relation to the implemented levels \\
+\midrule
+Input domain & Eo et al.~\cite{Eo2018KIKINet}; Gosche et al.~\cite{Gosche2024DomainInfluence} & Prior MRI work compares or combines spatial/image and Fourier/k-space learning domains. \\
+Pooling & Guberman~\cite{Guberman2016ComplexCNN}; Tao et al.~\cite{Tao2022Pooling}; Lee et al.~\cite{Lee2022CVNNSurvey} & Complex ordering is nontrivial; max/average/median represent distinct selection and aggregation principles. \\
+Normalization & Trabelsi et al.~\cite{Trabelsi2018DeepComplex}; Zhang and Sennrich~\cite{Zhang2019RMSNorm} & Covariance whitening motivates complex BatchNorm; RMSNorm motivates power-only re-scaling, adapted here to complex channel power. \\
+Convolution & Guberman~\cite{Guberman2016ComplexCNN}; Trabelsi et al.~\cite{Trabelsi2018DeepComplex}; Picinbono and Chevalier~\cite{Picinbono1995WidelyLinear} & Standard complex convolution imposes the complex-linear block structure; widely-linear processing adds a conjugate pathway. \\
+Activation & Nitta~\cite{Nitta1997ComplexBP}; Arjovsky et al.~\cite{Arjovsky2016Unitary}; Virtue et al.~\cite{Virtue2017ComplexActivation}; Scardapane et al.~\cite{Scardapane2020ComplexActivations} & Split, magnitude-gated, and phase-selective nonlinearities provide contrasting symmetry constraints. \\
+Stream/interaction & Young et al.~\cite{Young2026Hybrid}; Hu et al.~\cite{Hu2018SENet}; Woo et al.~\cite{Woo2018CBAM}; Eilers and Jiang~\cite{Eilers2023ComplexTransformer} & Hybrid real/complex paths, multiplicative gating, and complex attention motivate the interaction families; the exact gate and holographic score are defined here. \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+
+\subsection{Parameter Matching}
+The fixed real baseline contains 1,685,890 trainable scalar parameters. The canonical complex widths yield 1,681,473 parameters. For every noncanonical complex design, channel widths are treated as dependent variables. The implementation searches a scale factor around the canonical channel pattern and selects integer widths that minimize absolute parameter-count error relative to the real baseline. A configuration is accepted only when
+\begin{equation}
+\frac{|P_{\mathrm{complex}}-P_{\mathrm{real}}|}{P_{\mathrm{real}}}\le0.01.
+\label{eq:param-match}
+\end{equation}
+This is important because widely-linear kernels, dual branches, and interaction modules can otherwise increase scalar capacity independently of the representation question. Matching does not make the architectures functionally equivalent, but it controls the simplest capacity confound.
+
+\begin{table*}[t]
+\centering
+\caption{Representative architecture definitions and parameter-budget role.}
+\label{tab:architectures}
+\scriptsize
+\begin{tabularx}{\textwidth}{L{2.5cm}L{3.5cm}L{2.7cm}L{2.3cm}X}
+\toprule
+Model family & Input / stream & Canonical widths & Trainable scalars & Main structural distinction \\
+\midrule
+Real baseline & Four magnitude channels & 45/91/181/272 & 1,685,890 & Real conv + BatchNorm + SiLU + max pooling \\
+Canonical complex & Four complex channels, complex-only & 32/64/128/192 & 1,681,473 & Standard complex conv + RMSNorm + modReLU; pooling varied \\
+Widely-linear variants & Complex-only or dual & Automatically matched & Within 1\% of real & Adds conjugate kernel pathway; widths reduced as needed \\
+Dual-stream variants & Magnitude + complex & Automatically matched & Within 1\% of real & Parallel real/complex feature extraction and optional interaction \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+\subsection{Optimization and Imbalance Handling}
+Training uses AdamW~\cite{Loshchilov2019AdamW} with learning rate $10^{-3}$ and weight decay $10^{-4}$. The maximum number of epochs is 100. Mini-batch size is 8 with four gradient-accumulation steps, giving an effective optimization batch of 32 samples. The loss is unweighted binary cross entropy with logits. Dropout with probability 0.2 is applied before the final classifier.
+
+The training loader uses a weighted random sampler. If the training set contains $n_+$ positive and $n_-$ negative slices, samples are weighted inversely to their class counts, so the total expected sampling mass of each class is equal. This changes the training exposure without changing validation or test prevalence.
+
+All reported runs use random seed 10383. Each architecture therefore has one observed training realization in the present manuscript. The factorial comparisons characterize the resulting fixed-seed architecture surface and do not quantify optimization variability across random initializations or sampling trajectories.
+
+\subsection{Checkpoint and Threshold Selection}
+Early stopping patience is eight epochs. At each epoch, validation AUC is computed. The checkpoint with the highest validation AUC is saved; if validation AUC is undefined in an exceptional state, negative validation loss is used as the fallback ordering score. After the best checkpoint is restored, a classification threshold is selected on the validation set by maximizing balanced accuracy. The threshold is then frozen and applied to the test scores.
+
+This creates two separate forms of model selection:
+\begin{enumerate}
+    \item \emph{within-run selection}: validation AUC chooses the epoch and validation balanced accuracy chooses the operating threshold;
+    \item \emph{across-architecture description}: the test metrics of all 480 complex configurations are summarized after training.
+\end{enumerate}
+The second activity is exploratory because the same fixed test cohort is observed for many architectures.
+
+\subsection{Evaluation Metrics}
+The pipeline records accuracy, balanced accuracy, sensitivity, specificity, precision, F1 score, AUC, and average precision. AUC is emphasized as a threshold-independent ranking metric. Because the test prevalence is low, AP is reported alongside AUC as a prevalence-sensitive summary of positive-class ranking. Balanced accuracy, sensitivity, and specificity are computed at the validation-selected threshold.
+
+For test scores $s_i$ and labels $y_i$, the ROC curve is obtained by varying the score threshold, and AUC summarizes the probability-ranking behavior across thresholds. AP summarizes the precision-recall curve and therefore reacts more strongly to false positives in an imbalanced test set. The paper does not convert either metric into a patient-level clinical claim.
+
+\begin{table}[t]
+\centering
+\caption{Fixed training and evaluation protocol.}
+\label{tab:protocol}
+\scriptsize
+\begin{tabular}{ll}
+\toprule
+Setting & Value \\
+\midrule
+Optimizer & AdamW \\
+Learning rate & $10^{-3}$ \\
+Weight decay & $10^{-4}$ \\
+Maximum epochs & 100 \\
+Batch size & 8 \\
+Gradient accumulation & 4 \\
+Effective batch size & 32 \\
+Early-stopping patience & 8 epochs \\
+Checkpoint criterion & Validation AUC \\
+Training imbalance control & Weighted random sampler \\
+Loss & BCE with logits \\
+Threshold selection & Max. validation balanced accuracy \\
+Dropout before classifier & 0.2 \\
+Random seed & 10383 \\
+Reported runs & 481 \\
+Main metric & Test AUC; AP emphasized \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Descriptive Factorial Analysis}
+For each factor level, the study reports the finite-grid mean AUC and its difference from the fixed real baseline. Selected two-factor summaries are included when they clarify how a marginal pattern depends on input domain. These summaries use Eqs.~\eqref{eq:factor-effects} and are descriptive: they are averages over the implemented architecture grid, not random-effects estimates over a population of possible neural networks.
+
+The highest-AUC configurations are listed only as hypothesis-generating examples. Because all architectures are evaluated on the same test cohort, ranking the 480 configurations introduces model-selection optimism. A newly selected architecture would require a separate evaluation protocol before being treated as a confirmed model.
+
+\subsection{Reproducibility and Run Outputs}
+Each run stores its resolved model configuration, exact channel widths, trainable parameter count, training history, selected threshold, and test metrics. Completion markers and failed attempts are retained by the cluster workflow. The manuscript-level summary values are generated from the collected CSV rather than transcribed manually.
+
+\begin{figure*}[!t]
+\centering
+\blankfigure[3.0cm]
+\caption{Cartesian factorial design containing six implemented factors, 480 valid complex configurations, and the fixed real magnitude baseline.}
+\label{fig:factorial}
+\end{figure*}

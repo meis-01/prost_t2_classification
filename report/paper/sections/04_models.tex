@@ -1,0 +1,158 @@
+% =============================================================================
+\section{Complex-Valued Classification Models}\label{sec:models}
+% =============================================================================
+\subsection{Fixed Real Magnitude Baseline}
+The real reference network receives the four coil magnitudes and uses four convolutional stages with channel widths
+\begin{equation}
+45\rightarrow91\rightarrow181\rightarrow272.
+\end{equation}
+Each stage contains two $3\times3$ real convolutions, each followed by BatchNorm and SiLU. $2\times2$ max pooling follows the first three stages. The final stage is followed by adaptive global average pooling, dropout $p=0.2$, and a one-unit linear head. The model contains 1,685,890 trainable scalar parameters and defines the parameter budget for every complex configuration.
+
+The baseline is deliberately compact. The objective is not to maximize absolute benchmark accuracy with a large pretrained backbone, but to establish a fixed real-valued reference whose capacity can be matched by architectures with fundamentally different complex parameterizations. Parameter-controlled real-versus-complex comparisons have been emphasized in earlier complex MRI studies because a complex layer can otherwise carry a different scalar-parameter budget from an apparently similar real layer~\cite{Cole2021ComplexMRI}.
+
+\subsection{Standard Complex Convolution}
+For $z=x_r+ix_i$ and $W=W_r+iW_i$, standard complex convolution is implemented as
+\begin{align}
+\Re(W*z)&=W_r*x_r-W_i*x_i,\\
+\Im(W*z)&=W_r*x_i+W_i*x_r.
+\label{eq:complex-conv}
+\end{align}
+Each complex kernel therefore uses two real convolutional kernels and obeys the block structure in Eq.~\eqref{eq:real-linear-complex}. This construction is standard in modern CVNNs and has been used in deep complex CNN frameworks and complex-valued imaging applications~\cite{Guberman2016ComplexCNN,Trabelsi2018DeepComplex,Zhang2017ComplexCNNPolSAR,Lee2022CVNNSurvey}. The canonical complex channel widths are
+\begin{equation}
+32\rightarrow64\rightarrow128\rightarrow192.
+\end{equation}
+For the canonical RMSNorm/standard-convolution/complex-only/modReLU architecture, these widths yield 1,681,473 trainable scalar parameters.
+
+Analytically, standard complex convolution is the strongest algebraic constraint in the convolution factor. It preserves multiplication by $i$ and commutes with global phase rotations. Its benefit, if any, must therefore come from this structural restriction rather than from increased scalar capacity.
+
+\subsection{Widely-Linear Complex Convolution}
+Widely-linear estimation was introduced in complex signal processing to augment complex-linear models with the conjugate input, thereby representing improper/noncircular second-order structure that a strictly complex-linear map can miss~\cite{Picinbono1995WidelyLinear}. The widely-linear alternative used here is
+\begin{equation}
+y=W_1*z+W_2*z^*.
+\label{eq:widely-linear-conv}
+\end{equation}
+It uses direct and conjugate complex kernels, doubling the number of real convolutional kernel sets at a fixed width. The implementation therefore reduces channel widths automatically to remain within 1\% of the real baseline parameter count.
+
+From an algebraic perspective, the conjugate term permits interactions that violate strict complex linearity and generally breaks global $U(1)$ equivariance. The factor tests whether the stricter complex structure is an effective inductive bias or whether the task benefits from the broader real-linear hypothesis class.
+
+\subsection{Complex Normalization}
+\subsubsection{RMS power normalization}
+For channel $c$, training-time power is
+\begin{equation}
+p_c^{\mathrm{batch}}=\mathbb{E}_{b,u,v}\left[\Re(z_{b,c,u,v})^2+\Im(z_{b,c,u,v})^2\right].
+\end{equation}
+The running statistic is updated by exponential interpolation. Evaluation uses the running value. The design is a complex, channel-wise power adaptation of RMS normalization; RMSNorm itself was introduced as a re-scaling normalization based on root-mean-square statistics without explicit re-centering~\cite{Zhang2019RMSNorm}. The exact complex running-power formulation used here is specific to this implementation rather than being taken verbatim from that work. The output is
+\begin{equation}
+\mathrm{RMSNorm}(z_c)=z_c\exp(\ell_c)(p_c+\epsilon)^{-1/2},
+\end{equation}
+where $p_c=p_c^{\mathrm{batch}}$ in training and $p_c=p_c^{\mathrm{run}}$ in evaluation. The learned gain is positive because it is parameterized through $\exp(\ell_c)$. Since the normalization statistic is magnitude-only, global phase orientation is preserved.
+
+\subsubsection{Complex BatchNorm}
+Complex BatchNorm centers the real and imaginary components, estimates
+\begin{equation}
+V_c=\begin{bmatrix}V_{rr}&V_{ri}\\V_{ri}&V_{ii}\end{bmatrix},
+\end{equation}
+applies an analytic inverse square-root whitening transform, and then applies a learned symmetric $2\times2$ affine map plus separate real and imaginary biases. Running means and covariance terms are used at evaluation. This construction follows the complex whitening approach popularized for deep complex networks~\cite{Trabelsi2018DeepComplex}; normalization choices and their interaction with complex activations are also reviewed in the broader CVNN literature~\cite{Lee2022CVNNSurvey}.
+
+The two normalization levels therefore differ in more than scaling strength. RMSNorm preserves the complex direction and changes only channel power, whereas complex BatchNorm can rotate, shear, and rescale the local Cartesian covariance through whitening and the learned affine transformation.
+
+\subsection{Complex Nonlinearities}
+The grid contains four nonlinearities with distinct phase behavior.
+
+\subsubsection{modReLU}
+\begin{equation}
+\mathrm{modReLU}(z)=z\frac{\mathrm{ReLU}(|z|+b)}{|z|+\epsilon}.
+\end{equation}
+The gate depends only on magnitude, so the active complex direction is preserved. The bias $b$ is learned per channel. modReLU was introduced for unitary recurrent neural networks and has since become a standard phase-preserving CVNN activation~\cite{Arjovsky2016Unitary,Lee2022CVNNSurvey}.
+
+\subsubsection{Magnitude-gated SiLU}
+The implemented smooth gate is
+\begin{equation}
+\mathrm{MagSiLU}(z)=z\,\sigma\!\left(a(|z|-b)\right),
+\end{equation}
+where the positive slope $a$ is produced through a softplus parameterization and $b$ is learned. The real SiLU family multiplies an input by a sigmoid gate~\cite{Elfwing2018SiLU}; the operator above is our complex magnitude-gated adaptation rather than a previously standardized complex SiLU. Like modReLU, the gate is a real function of magnitude and is globally phase-equivariant.
+
+\subsubsection{Cartesian ReLU}
+\begin{equation}
+\mathrm{CReLU}(z)=\mathrm{ReLU}(\Re z)+i\,\mathrm{ReLU}(\Im z).
+\end{equation}
+CReLU treats the Cartesian axes independently. Split activations that apply real nonlinearities separately to the real and imaginary components are a long-standing CVNN construction~\cite{Nitta1997ComplexBP,Scardapane2020ComplexActivations,Lee2022CVNNSurvey}. It is expressive and simple but does not preserve a common phase rotation.
+
+\subsubsection{Cardioid}
+\begin{equation}
+\mathrm{Cardioid}(z)=\frac{1}{2}\left(1+\cos(\arg z)\right)z.
+\end{equation}
+The amplitude gate depends explicitly on phase relative to the positive real axis. It is therefore phase-selective rather than globally rotation-equivariant. The cardioid activation was introduced for complex-valued MRI fingerprinting as a phase-sensitive nonlinear gate~\cite{Virtue2017ComplexActivation} and is discussed in later CVNN surveys~\cite{Lee2022CVNNSurvey}.
+
+\subsection{Complex Pooling}
+Pooling over complex-valued features is nontrivial because $\mathbb{C}$ has no natural total order; this issue is discussed in early complex CNN work and later reviews~\cite{Guberman2016ComplexCNN,Lee2022CVNNSurvey}. In real-valued CNNs, max, average, and median pooling represent distinct selection/aggregation families, with median pooling often motivated as an order-statistic alternative with robustness to outliers/noise~\cite{Tao2022Pooling}. Three $2\times2$ pooling operators are evaluated. Magnitude-max pooling selects the full complex value whose squared magnitude is largest. Magnitude-median pooling unfolds each window, ranks the squared magnitudes, and returns the full complex value at the median index; for the four-element window, the implementation returns the lower median. Complex average pooling averages real and imaginary components separately, which is equivalent to averaging the complex values directly.
+
+All three operators are globally phase-equivariant when applied in isolation. The magnitude-ranked max and median rules are complex extensions defined by this implementation: the ordering is performed on $|z|$ and the selected full complex sample is returned. Their difference is how they summarize local structure: max selects an amplitude extreme, median selects a robust order statistic, and average preserves linearity but mixes local phases through the interference terms in Eq.~\eqref{eq:complex-average-coherence}.
+
+\subsection{Complex-Only Architecture}
+The complex-only model uses four complex blocks, each containing two complex convolutions, normalization, and activation. The first three blocks are followed by the selected complex pooling operator. After the third pooled block, the model optionally inserts holographic attention. The fourth block is followed by adaptive average pooling of the feature magnitudes, dropout, and a real linear classifier. The conversion from complex features to magnitudes therefore occurs only near the final readout.
+
+\subsection{Dual-Stream Architecture}
+The dual-stream model initializes
+\begin{equation}
+h_r^{(0)}=|Z|,\qquad h_c^{(0)}=Z.
+\end{equation}
+Each stage contains a conventional real block and a complex block. The real branch always uses real max pooling; the complex branch uses the factorial complex-pooling choice. After the final stage, global pooled real features are concatenated with pooled complex magnitudes before classification.
+
+Hybrid real/complex architectures have recently been studied as a way to combine computationally efficient real-valued processing with complex-valued paths and explicit domain-conversion mechanisms~\cite{Young2026Hybrid}. This architecture makes the invariance structure explicit. The real branch is invariant to complex phase from the outset, whereas the complex branch can retain phase-dependent features. Late concatenation asks whether these two representations are complementary under the same overall parameter budget.
+
+\subsection{Modulus Cross-Stream Gate}
+For gated dual-stream models, the complex feature magnitude is mapped through a real convolution and sigmoid,
+\begin{equation}
+g=\sigma(K*|h_c|),
+\end{equation}
+and the real features are modulated as
+\begin{equation}
+h_r\leftarrow h_r\odot g.
+\end{equation}
+Multiplicative sigmoid gating is widely used to recalibrate feature responses in architectures such as squeeze-and-excitation and convolutional block attention~\cite{Hu2018SENet,Woo2018CBAM}. The exact modulus cross-stream gate above is specific to this study: the conditioning signal is derived from the magnitude of the complex branch. Because the gate depends on $|h_c|$, it is insensitive to a common phase rotation of the complex branch. The interaction introduces cross-stream conditioning without passing the complex angle directly into the real branch.
+
+\subsection{Interference-Aware Holographic Interaction}
+Scaled dot-product attention provides the real-valued template for query-key similarity and value aggregation~\cite{Vaswani2017Attention}. Complex-valued transformer work has subsequently studied complex variants of scaled dot-product attention~\cite{Eilers2023ComplexTransformer}. The holographic module in this study forms complex query, key, and value projections. For token indices $i,j$ and embedding dimension $d$, the similarity is
+\begin{equation}
+s_{ij}^{(H)}=\frac{\Re\{q_i k_j^H\}}{\sqrt d}.
+\end{equation}
+The implementation subtracts a magnitude-geometry penalty,
+\begin{equation}
+s_{ij}=s_{ij}^{(H)}-\gamma\frac{\||q_i|-|k_j|\|_2^2}{d},\qquad \gamma=1.
+\label{eq:holographic}
+\end{equation}
+Softmax-normalized weights aggregate the complex values, followed by an output projection, residual connection, and the selected complex normalization. The first term is a real Hermitian similarity; the second compares magnitude vectors rather than full complex Euclidean distance. The added magnitude-distance penalty and its combination with the Hermitian score are specific to the present implementation; the cited complex-attention literature motivates the complex query/key/value attention setting, not this exact score.
+
+\begin{figure*}[!t]
+\centering
+\blankfigure[3.8cm]
+\caption{Architecture families included in the factorial study: the real magnitude baseline, the complex-only network, and the dual-stream network with optional modulus-gate or holographic interaction.}
+\label{fig:architectures}
+\end{figure*}
+
+\begin{table*}[t]
+\centering
+\caption{Symmetry and structural properties of implemented complex operators. ``Equivariant'' refers to a common global phase rotation when the operator is considered in isolation.}
+\label{tab:operator-properties}
+\scriptsize
+\begin{tabularx}{\textwidth}{L{2.2cm}L{2.8cm}C{1.5cm}L{3.6cm}X}
+\toprule
+Family & Level & Global-phase behavior & Main algebraic mechanism & Structural implication \\
+\midrule
+Convolution & Standard & Equivariant & $\mathbb{C}$-linear block structure & Strong coupling of real/imaginary kernels \\
+Convolution & Widely linear & Not general & Direct plus conjugate pathways & General real-linear flexibility \\
+Normalization & RMS & Equivariant & Magnitude-power rescaling & Preserves complex direction \\
+Normalization & Complex BN & Not general & Real-imaginary centering, whitening, affine map & Adapts Cartesian covariance \\
+Activation & modReLU & Equivariant & Magnitude threshold/gate & Preserves phase direction \\
+Activation & Mag-SiLU & Equivariant & Smooth magnitude gate & Preserves phase direction \\
+Activation & CReLU & No & Independent Cartesian rectification & Privileges real/imaginary axes \\
+Activation & Cardioid & No & Phase-dependent amplitude gate & Explicitly phase selective \\
+Pooling & Max & Equivariant & Select max-magnitude sample & Preserves selected complex value \\
+Pooling & Median & Equivariant & Select median-magnitude sample & Robust order-statistic selection \\
+Pooling & Average & Equivariant & Complex-linear averaging & Mixes local phases through vector sum \\
+Interaction & Modulus gate & Invariant gate & Real function of complex magnitude & Phase-insensitive cross-stream modulation \\
+Interaction & Holographic & Conditional & Hermitian similarity + magnitude distance & Attention weights can be rotation-invariant under equivariant projections \\
+\bottomrule
+\end{tabularx}
+\end{table*}

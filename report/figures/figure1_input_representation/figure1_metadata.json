@@ -1,0 +1,99 @@
+{
+  "fourier_log_display_vmax": 0.9443489909172058,
+  "fourier_magnitude_display": "full-frame log1p of scaled magnitude for visualization only; model input remains the scaled complex Fourier representation",
+  "fourier_phase_display": {
+    "X_definition": "shared-robust-scaled centered orthonormal FFT representation",
+    "applies_to": "displayed Fourier-phase panels only",
+    "central_crop_bounds_y0_y1_x0_x1": [
+      56,
+      168,
+      56,
+      168
+    ],
+    "central_crop_fraction": 0.5,
+    "central_crop_shape": [
+      112,
+      112
+    ],
+    "gamma": 1.5,
+    "lambda": 4.0,
+    "model_input_changed": false,
+    "neutral_background": "white",
+    "weight_formula": "w = clip(log1p(lambda * abs(X)) / percentile_99(log1p(lambda * abs(X))), 0, 1) ** gamma",
+    "weight_scale": 1.5797110795974731
+  },
+  "image_display_vmax": 1.0790998935699463,
+  "image_phase_display": {
+    "foreground_support": "RSS >= 0.02 * 99th percentile of RSS, matching align_multicoil_phase",
+    "magnitude_weighting": "not applied",
+    "model_input_changed": false,
+    "opacity": "near-full within the existing foreground support"
+  },
+  "image_support_pixels": 50174,
+  "input_key": "image_complex",
+  "input_shape": [
+    4,
+    224,
+    224
+  ],
+  "panel_images": {
+    "fourier_log_magnitude_coil1": "fourier_log_magnitude_coil1.png",
+    "fourier_log_magnitude_coil2": "fourier_log_magnitude_coil2.png",
+    "fourier_log_magnitude_coil3": "fourier_log_magnitude_coil3.png",
+    "fourier_log_magnitude_coil4": "fourier_log_magnitude_coil4.png",
+    "fourier_phase_coil1": "fourier_phase_coil1.png",
+    "fourier_phase_coil2": "fourier_phase_coil2.png",
+    "fourier_phase_coil3": "fourier_phase_coil3.png",
+    "fourier_phase_coil4": "fourier_phase_coil4.png",
+    "image_magnitude_coil1": "image_magnitude_coil1.png",
+    "image_magnitude_coil2": "image_magnitude_coil2.png",
+    "image_magnitude_coil3": "image_magnitude_coil3.png",
+    "image_magnitude_coil4": "image_magnitude_coil4.png",
+    "image_phase_coil1": "image_phase_coil1.png",
+    "image_phase_coil2": "image_phase_coil2.png",
+    "image_phase_coil3": "image_phase_coil3.png",
+    "image_phase_coil4": "image_phase_coil4.png"
+  },
+  "phase_range": [
+    -3.141592653589793,
+    3.141592653589793
+  ],
+  "phase_visualization": {
+    "Fourier_phase_gamma": 1.5,
+    "Fourier_phase_lambda": 4.0,
+    "Fourier_phase_magnitude_weight": "w = clip(log1p(lambda * abs(X)) / percentile_99(log1p(lambda * abs(X))), 0, 1) ** gamma",
+    "Fourier_phase_weight_scope": "one percentile-normalized weight scale per Fourier representation across all four coils",
+    "image_phase_opacity": "near-full within the existing foreground support mask; no magnitude weighting",
+    "model_input_changed": false,
+    "neutral_background": "white",
+    "phase_hue": "angle of the scaled complex representation mapped with the cyclic twilight colormap over [-pi, pi]"
+  },
+  "preprocessing": [
+    "load image_complex",
+    "verify exactly four complex coils",
+    "align_multicoil_phase(image_complex)",
+    "image representation: aligned complex image",
+    "Fourier representation: centered_fft2(aligned_image)",
+    "scale each representation with scale_complex_by_magnitude(..., shared_scale=True, percentile=99.0)"
+  ],
+  "selected_manifest": "C:\\Users\\meisa\\Data\\npz_t2_phase4\\manifest.csv",
+  "selected_manifest_row": {
+    "PIRADS": 1,
+    "acquisition_index": 1,
+    "channels": 4,
+    "data_split": "training",
+    "fastmri_pt_id": 1,
+    "fastmri_rawfile": "file_prostate_AXT2_001.h5",
+    "folder": "fastMRI_prostate_T2_IDS_001_020",
+    "height": 224,
+    "label": 0,
+    "path": "samples/pt001_slice001.npz",
+    "selected_coils": "6;11;8;9",
+    "slice": 1,
+    "slice_index": 0,
+    "source_recon": "D:\\fastmri_prostate\\recon_t2_phase4\\fastMRI_prostate_T2_IDS_001_020\\file_prostate_AXT2_001_complex_recon.h5",
+    "width": 224
+  },
+  "selected_sample_path": "C:\\Users\\meisa\\Data\\npz_t2_phase4\\samples\\pt001_slice001.npz",
+  "selection_rule": "lexicographically smallest path among data_split == training rows; stable tie-breakers fastmri_pt_id then slice_index"
+}

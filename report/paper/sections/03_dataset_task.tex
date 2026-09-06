@@ -1,0 +1,164 @@
+% =============================================================================
+\section{Dataset and Problem Formulation}\label{sec:data}
+% =============================================================================
+\subsection{fastMRI Prostate Data Source}
+The fastMRI Prostate dataset is a public biparametric prostate MRI resource containing T2-weighted and diffusion-weighted acquisitions from 312 patients, with raw multicoil data, reconstructed images, scanner DICOMs, and research labels~\cite{Tibrewala2024FastMRIProstate}. The source study acquired 2D axial T2-weighted turbo-spin-echo and EPI diffusion-weighted sequences on clinical 3~T systems. The public release contains 47,468 slices from 1,560 volumes and provides slice-, volume-, and exam-level PI-RADS labels~\cite{Tibrewala2024FastMRIProstate}.
+
+The present experiment does not use the entire public release. It uses the prepared T2-weighted subset produced for the current training pipeline. Each learning sample is one axial slice represented by four selected complex-valued coil channels. The loader requires a complex array with four channels and does not resize the spatial dimensions; the exact dimensions are therefore properties of the prepared sample files rather than a transformation performed during training.
+
+\subsection{Why the Study Uses T2-Weighted Slices}\label{sec:why-t2}
+The choice of T2-weighted input is methodological rather than a claim that T2-weighted imaging alone is the optimal clinical prostate MRI protocol. PI-RADS v2.1 uses T2-weighted imaging to delineate prostate zonal anatomy, characterize intraglandular abnormalities, and evaluate local structural features, while diffusion-weighted imaging contributes complementary information and is the dominant sequence for peripheral-zone scoring~\cite{Turkbey2019PIRADSv21}. A complete clinical examination therefore uses information beyond a single T2-weighted slice.
+
+For the present complex-valued representation study, T2-weighted data offer four practical advantages. First, the T2 acquisition has direct multicoil complex measurements and a straightforward image-domain interpretation. Second, T2 contrast provides detailed anatomical structure and lesion morphology, making it a meaningful diagnostic substrate rather than a purely technical reconstruction target. Third, restricting the task to one sequence avoids conflating complex-network effects with multimodal fusion. Fourth, the diffusion branch in fastMRI Prostate includes EPI acquisition, multiple diffusion directions and $b$-values, matched-filter coil combination, and derived ADC/high-$b$ products~\cite{Tibrewala2024FastMRIProstate}; these additional operations would complicate attribution of any observed effect to the complex representation itself.
+
+Table~\ref{tab:t2-scope} summarizes the scope decision. The study should therefore be read as a controlled T2-weighted signal-representation experiment, not as a substitute for biparametric or multiparametric clinical prostate MRI.
+
+\begin{table*}[t]
+\centering
+\caption{Sequence-scope rationale for the present study.}
+\label{tab:t2-scope}
+\scriptsize
+\begin{tabularx}{\textwidth}{L{2.4cm}L{5.2cm}X}
+\toprule
+Aspect & T2-weighted branch & Diffusion branch in the public dataset \\
+\midrule
+Clinical information & Zonal anatomy, gland structure, lesion morphology, local extension features~\cite{Turkbey2019PIRADSv21} & Diffusion restriction represented through multiple $b$-values, ADC, and high-$b$-value contrasts \\
+Acquisition/reconstruction path & Axial T2-weighted turbo-spin-echo with multicoil complex data & EPI diffusion acquisition with directions, repeated averages, gridding/reconstruction, and derived maps~\cite{Tibrewala2024FastMRIProstate} \\
+Reason for current scope & Provides a single-sequence complex input with clear image-domain anatomy and minimal modality-fusion confounding & Scientifically important but introduces additional sequence-specific transformations that are outside the present controlled comparison \\
+Interpretation & Controlled T2 slice-classification experiment & Not evaluated here; omission is a scope limitation rather than evidence against diffusion information \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+\subsection{Slice-Level PI-RADS Grouping and Binary Target}\label{sec:labels}
+A fellowship-trained radiologist assigned PI-RADS v2.1 labels to the released T2 and diffusion slices retrospectively for research purposes~\cite{Tibrewala2024FastMRIProstate}. Importantly, the source dataset labels T2 and DWI slices in isolation. This differs from routine clinical PI-RADS assessment, which integrates the full examination. The dataset creators provide slice-level labels partly to increase the number of supervised training examples, with the explicit caveat that neighboring slices from one patient are correlated~\cite{Tibrewala2024FastMRIProstate}.
+
+The current manifest groups the five PI-RADS categories into
+\begin{equation}
+y=
+\begin{cases}
+0, & \text{PI-RADS }1\text{--}2,\\
+1, & \text{PI-RADS }3\text{--}5.
+\end{cases}
+\label{eq:binary-label}
+\end{equation}
+This threshold matches the binary grouping used in the fastMRI Prostate technical classification demonstration~\cite{Tibrewala2024FastMRIProstate}. In this manuscript, however, $y=1$ is described as \emph{higher radiological suspicion} rather than as pathologically proven clinically significant cancer. PI-RADS 3 is indeterminate, and the slice annotation is not a histopathology label.
+
+The learning problem is therefore
+\begin{equation}
+f_\theta:\mathcal{X}\rightarrow\mathbb{R},\qquad
+\hat p_\theta(y=1\mid x)=\sigma(f_\theta(x)),
+\label{eq:classification-map}
+\end{equation}
+where $x$ is either a four-channel real magnitude tensor or a four-channel complex tensor. The output is a slice-level probability score.
+
+\subsection{Prepared Cohort and Class Imbalance}
+The current prepared cohort contains 8,225 slices from 270 patients. Patient identifiers are disjoint across training, validation, and test partitions, which prevents slices from the same patient from appearing in more than one split. The positive slice prevalence is low in every split: approximately 5.27\% in training, 6.50\% in validation, and 5.06\% in test. This imbalance motivates balanced sampling during training and the joint reporting of AUC and average precision.
+
+\begin{table}[t]
+\centering
+\caption{Prepared T2-weighted cohort and positive-slice prevalence.}
+\label{tab:cohort}
+\scriptsize
+\begin{tabular}{lrrrrr}
+\toprule
+Split & Patients & Slices & PI-RADS 1--2 & PI-RADS 3--5 & Pos. \% \\
+\midrule
+Training   & 189 & 5,672 & 5,373 & 299 & 5.27 \\
+Validation & 41  & 1,308 & 1,223 & 85  & 6.50 \\
+Test       & 40  & 1,245 & 1,182 & 63  & 5.06 \\
+\midrule
+Total      & 270 & 8,225 & 7,778 & 447 & 5.43 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table*}[t]
+\centering
+\caption{Definition of the supervised classification task and evaluation units.}
+\label{tab:task-definition}
+\scriptsize
+\begin{tabularx}{\textwidth}{L{3.1cm}L{4.3cm}X}
+\toprule
+Item & Definition in this study & Consequence for interpretation \\
+\midrule
+Input sample & One prepared axial T2-weighted slice with four selected coil channels & Metrics are slice-level, not exam-level or patient-level diagnostic accuracy \\
+Negative class & PI-RADS 1--2 & Low radiological suspicion group \\
+Positive class & PI-RADS 3--5 & Intermediate-to-very-high radiological suspicion group; not a histopathology endpoint \\
+Split unit & Patient identifier & All slices from one patient remain in only one of training, validation, or test \\
+Training imbalance handling & Weighted random sampler with equal total class sampling mass & Optimization sees positives more frequently; validation/test prevalence remains unchanged \\
+Checkpoint selection & Maximum validation AUC & Test labels do not select the epoch \\
+Operating threshold & Maximum validation balanced accuracy & Threshold-dependent test metrics use a validation-selected cutoff \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+\subsection{Complex Coil Representation and Phase Alignment}
+Let the four-coil complex image for one slice be
+\begin{align}
+\mathbf{x} &= [x_1,x_2,x_3,x_4],\\
+x_c(u,v) &= a_c(u,v)+ib_c(u,v)=r_c(u,v)e^{i\phi_c(u,v)}.
+\end{align}
+The preprocessing removes arbitrary coil-wise global phase offsets while retaining spatially varying phase inside an estimated signal support. The implementation first computes an \ac{RSS} magnitude
+\begin{equation}
+r_{\mathrm{RSS}}(u,v)=\left(\sum_{c=1}^{4}|x_c(u,v)|^2\right)^{1/2}.
+\end{equation}
+Let $s_{99}$ be the 99th percentile of $r_{\mathrm{RSS}}$. The support is
+\begin{equation}
+\Omega=\{(u,v):r_{\mathrm{RSS}}(u,v)\ge 0.02s_{99}\}.
+\label{eq:support}
+\end{equation}
+The first coil is used as the reference. Its global phase is anchored by a magnitude-weighted complex sum over $\Omega$. Each remaining coil $c$ is then rotated according to the cross-phase
+\begin{equation}
+\eta_c=\sum_{(u,v)\in\Omega}x_c(u,v)x_1(u,v)^*,
+\end{equation}
+so that the applied offset is $e^{-i\arg\eta_c}$ when $|\eta_c|$ is numerically nonzero. Values outside $\Omega$ are set to zero.
+
+After alignment, one shared scale is computed from the 99th percentile of $|\mathbf{x}|$ across all coils and spatial locations,
+\begin{equation}
+\tilde{\mathbf{x}}=\frac{\mathbf{x}}{q_{0.99}+\epsilon}.
+\label{eq:shared-scale}
+\end{equation}
+A single scalar is used for all coils and both Cartesian components. This preserves relative coil amplitudes and complex angles while limiting the influence of extreme magnitudes.
+
+\subsection{Image-Domain and Fourier-Domain Inputs}
+The factorial grid includes two complex input domains. The image-domain branch uses $\tilde{\mathbf{x}}$ directly. The Fourier-domain branch applies a centered orthonormal two-dimensional FFT to each coil,
+\begin{equation}
+\tilde{X}_c=\mathrm{fftshift}\left(\mathrm{FFT}_2\left(\mathrm{ifftshift}(\tilde{x}_c)\right)\right),
+\label{eq:fft-input}
+\end{equation}
+with orthonormal normalization. The resulting tensor is scaled by the same shared-magnitude principle. Learning in image and Fourier coordinates has been studied extensively in MRI reconstruction; cross-domain designs such as KIKI-net explicitly alternate image- and k-space CNNs~\cite{Eo2018KIKINet}, and more recent work has examined how spatial versus k-space input changes the inductive bias of MRI segmentation networks~\cite{Gosche2024DomainInfluence}. In the present study the domain factor is deliberately simpler: the same prepared complex tensor is presented either in image coordinates or after a unitary FFT, without a reconstruction/data-consistency loop. This branch should therefore be described as an FFT-derived Fourier representation of the prepared complex images, not as untouched scanner raw k-space.
+
+The real baseline receives
+\begin{equation}
+x_{\mathrm{real}}=|\tilde{\mathbf{x}}|\in\mathbb{R}^{4\times H\times W}.
+\label{eq:real-input}
+\end{equation}
+Thus the real baseline preserves coil-specific magnitudes but discards phase before feature learning.
+
+\begin{figure*}[!t]
+\centering
+\blankfigure[4.3cm]
+\caption{Representative prepared slice shown as image-domain magnitude, image-domain phase, Fourier-domain log magnitude, and Fourier-domain phase for the four selected coil channels.}
+\label{fig:input-panels}
+\end{figure*}
+
+\subsection{Global-Phase Augmentation}
+Complex training samples receive a random global phase rotation,
+\begin{equation}
+\tilde{\mathbf{x}}' = e^{i\theta}\tilde{\mathbf{x}},\qquad \theta\sim\mathcal{U}[-\pi,\pi].
+\label{eq:globalphase}
+\end{equation}
+Validation and test samples are not phase augmented. The augmentation changes neither the magnitude input nor the binary target and discourages dependence on an arbitrary common phase origin.
+
+\subsection{Training Target and Evaluation Flow}
+Training minimizes unweighted binary cross entropy with logits. Class imbalance is handled by a weighted random sampler that assigns equal total sampling mass to the two classes in the training loader. Validation and test retain their empirical prevalence.
+
+AUC is the main threshold-independent discrimination metric. After training, the checkpoint with the highest validation AUC is restored. A classification threshold is then selected on the validation set by maximizing balanced accuracy and is frozen before evaluation on the test set. Average precision is reported prominently because the positive test prevalence is approximately 5\%.
+
+\begin{figure*}[!t]
+\centering
+\blankfigure[3.2cm]
+\caption{Study flow from prepared four-coil T2-weighted slices through preprocessing, real or complex model input, validation-based checkpoint and threshold selection, and fixed-cohort test evaluation.}
+\label{fig:pipeline}
+\end{figure*}

@@ -1,43 +1,29 @@
-% \documentclass[draftcls, journal, onecolumn]{IEEEtran}
-% \documentclass[journal,draftcls,onecolumn,12pt,twoside]{IEEEtranTCOM}
 \documentclass[journal]{IEEEtran}
 
-%% Packages retained from the supplied journal template.
 \usepackage{booktabs}
-\usepackage{amsfonts}
 \usepackage{placeins}
 \usepackage{acronym}
-\usepackage{amsmath}
+\usepackage{amsmath,amssymb,amsfonts}
 \usepackage{tabularx}
 \usepackage{stfloats}
 \usepackage{siunitx}
-\usepackage{amsmath,amssymb,amsfonts}
 \usepackage{graphicx}
-\usepackage{setspace}
 \usepackage{mathtools}
-\usepackage{color}
 \usepackage{array}
-\usepackage[version=4]{mhchem}
-\usepackage{float}
-\usepackage{stmaryrd}
-\usepackage{soul}
-\usepackage{stackrel}
-\usepackage{epstopdf}
 \usepackage{url}
 \usepackage{xspace}
 \usepackage{cite}
-\usepackage{tikz}
-\usetikzlibrary{automata,arrows,positioning,calc}
-\usepackage{bigints}
 \usepackage{threeparttable}
-\usepackage{bbm}
-\usepackage{dsfont}
-\usepackage{pgfplots}\pgfplotsset{compat=1.18}
-\usepgfplotslibrary{groupplots}
-\usetikzlibrary{arrows.meta,positioning,angles,quotes,shadings,fit,shapes.geometric}
+\usepackage{multirow}
 
 \newcolumntype{L}[1]{>{\raggedright\arraybackslash}m{#1}}
 \newcolumntype{C}[1]{>{\centering\arraybackslash}m{#1}}
+
+% Blank figure placeholder. The caption carries the figure description.
+\newcommand{\blankfigure}[1][3.3cm]{%
+  \fbox{\rule{0pt}{#1}\rule{0.94\linewidth}{0pt}}%
+}
+
 \input{acronyms.tex}
 \input{generated_metrics.tex}
 \input{generated_tables.tex}
@@ -54,589 +40,32 @@
 
 \maketitle
 
-
 \begin{abstract}
-Magnetic resonance data are acquired as complex-valued signals, yet diagnostic learning pipelines commonly discard phase and operate on magnitude images. We report one completed, exhaustive factorial study of slice-level PI-RADS-group classification in a prepared four-coil subset of fastMRI Prostate T2-weighted MRI. A fixed real magnitude CNN is compared with 480 parameter-matched complex configurations spanning input domain, pooling, normalization, convolution, activation, and stream/interaction choices. All 481 runs use seed 10383 and patient-disjoint partitions. Only \ComplexWins/\ComplexTotal complex configurations exceed the real-baseline AUC of \RealAUC. Image-domain models average \ImageAUC AUC and \ImageAP AP, compared with \FourierAUC AUC and \FourierAP AP for Fourier-domain models. The canonical median model is approximately tied with the real baseline, whereas the maximum AUC of \BestAUC is exploratory because all configurations use the same held-out patient cohort. Complex-valued benefit is therefore architecture- and representation-dependent: image-domain representation has the largest marginal contrast, while normalization and stream design further modulate performance.
+Magnetic resonance data are acquired as complex-valued signals, yet diagnostic learning pipelines commonly discard phase and operate on magnitude images. We study slice-level PI-RADS-group classification in a prepared four-coil subset of fastMRI Prostate T2-weighted MRI using one fixed real magnitude CNN and 480 parameter-matched complex configurations. The complex factorial grid spans input domain, pooling, normalization, convolution, activation, and stream/interaction design. All 481 runs use seed 10383 and patient-disjoint partitions. Only \ComplexWins/\ComplexTotal complex configurations exceed the real-baseline AUC of \RealAUC. Image-domain models average \ImageAUC AUC and \ImageAP AP, compared with \FourierAUC AUC and \FourierAP AP for Fourier-domain models. The canonical median model is approximately tied with the real baseline, whereas the maximum AUC of \BestAUC is exploratory because all configurations are evaluated on the same held-out patient cohort. The factorial study therefore characterizes complex-valued benefit as architecture- and representation-dependent rather than universal.
 \end{abstract}
 
 \begin{IEEEkeywords}
-Complex-valued neural networks, magnetic resonance imaging, prostate MRI, fastMRI, k-space, phase information, medical image classification.
+Complex-valued neural networks, magnetic resonance imaging, prostate MRI, fastMRI, T2-weighted imaging, k-space, phase information, medical image classification.
 \end{IEEEkeywords}
 
 \IEEEpeerreviewmaketitle
 \acresetall
 
-% =============================================================================
-\section{Introduction}\label{sec:introduction}
-% =============================================================================
-\IEEEPARstart{M}{agnetic} resonance imaging is intrinsically complex-valued. The receiver coils measure oscillating electromagnetic signals whose discretized samples are represented by real and imaginary components in spatial-frequency space, or k-space. Image formation subsequently combines Fourier reconstruction, coil information, and magnitude operations into representations optimized for human interpretation. In most diagnostic machine-learning pipelines, the final input is consequently a real-valued magnitude image. This convention is natural from a clinical-imaging perspective, but it removes explicit phase information before the learning algorithm is given an opportunity to determine whether that information is useful for the task.
-
-The distinction is relevant because magnitude and phase are not independent bookkeeping devices. A complex sample $z=a+\mathrm{i}b=r\mathrm{e}^{\mathrm{i}\phi}$ jointly represents amplitude $r$ and phase $\phi$. Operations in the complex domain therefore couple two real degrees of freedom through a structured algebra. A conventional real-valued network can in principle receive the real and imaginary components as independent channels and learn useful interactions, but its layers do not impose the multiplication rules, rotation structure, or phase relationships that are native to the data. A \ac{CVNN}, by contrast, implements these relationships directly through complex convolution and complex-aware nonlinearities and normalization. This inductive bias is attractive when the signal-generating process itself is naturally complex-valued.
-
-Complex-valued deep learning is well established at the methodological level. Trabelsi \emph{et al.} developed practical complex convolution, normalization, initialization, and activation machinery for deep networks~\cite{Trabelsi2018DeepComplex}. In MRI, several studies have shown advantages of complex-valued processing for reconstruction and explicitly phase-dependent problems. Cole \emph{et al.} reported parameter-controlled comparisons in which complex networks improved accelerated MRI reconstruction and phase-focused applications~\cite{Cole2021ComplexMRI}, while Xiao \emph{et al.} demonstrated complex-valued learning for partial-Fourier recovery of both magnitude and phase~\cite{Xiao2022ComplexPartialFourier}. Virtue \emph{et al.} also explored complex-valued networks and phase-sensitive activations for MR fingerprinting~\cite{Virtue2017ComplexActivation}. These results make a strong case that complex-valued modeling can be useful when the target depends directly on signal phase or reconstruction fidelity. They do not, however, establish that the same advantage transfers to diagnostic classification, where labels are substantially farther from the acquisition physics.
-
-The fastMRI project has enabled systematic study of learning from raw MR data by releasing raw k-space together with reconstructed images~\cite{Knoll2020fastMRI}. Its prostate extension provides biparametric prostate MRI, including T2-weighted and diffusion-weighted acquisitions, raw multi-coil data, reconstructions, and radiologist-assigned labels~\cite{Tibrewala2024FastMRIProstate}. The accompanying benchmark showed that conventional magnitude-image models can learn diagnostically relevant information from this dataset. This creates a useful controlled setting for a more specific question: when the same classification problem is approached with the native complex coil information, does preserving phase improve discrimination beyond what can be achieved from magnitude alone?
-
-\subsection{Why Phase May Matter for Diagnostic Classification}
-The diagnostic relevance of phase is less direct than its relevance for reconstruction, but there are several reasons not to discard it a priori. In a multi-coil acquisition, the measured complex signal is modulated by spatially varying coil sensitivities as well as by the underlying object. Magnitude combines part of this information into a nonnegative intensity representation, whereas the relative complex relationships between coils retain additional spatial structure. A discriminative model could exploit these relationships even when no individual phase map is itself visually interpretable as a diagnostic image.
-
-A second consideration is that phase and magnitude respond differently to transformations and perturbations. If all coils are multiplied by a common phase factor $\mathrm{e}^{\mathrm{i}\alpha}$, magnitudes are unchanged and the diagnostic label should remain unchanged. A desirable complex representation can therefore be equivariant through feature extraction and invariant at the classification head. For a complex-linear map $f$ without phase-breaking nonlinearities,
-\begin{align}
-f(\mathrm{e}^{\mathrm{i}\alpha}z)
-=\mathrm{e}^{\mathrm{i}\alpha}f(z).
-\end{align}
-If the final classifier depends on $|f(z)|$, this common rotation cancels. The implemented global-phase augmentation enforces the same task-level assumption even for configurations whose nonlinearities or normalization are not exactly equivariant. In this sense, the experiment probes not only whether phase is present, but also how strongly phase-consistent architectural constraints should be imposed.
-
-A third consideration is statistical efficiency. Representing a complex tensor as independent real-valued channels leaves the network to learn the algebraic coupling between Cartesian components from data. A complex convolution hard-codes one particular coupling. This reduces freedom relative to an unrestricted real-linear map and can act as a structured regularizer when the assumption is appropriate. Widely-linear convolution relaxes that constraint by including the conjugate input. Comparing these alternatives at matched scalar parameter count therefore tests a continuum from stronger complex structure to greater real-linear flexibility.
-
-At the same time, phase is a potential source of nuisance variation. Scanner-dependent offsets, motion, field inhomogeneity, and coil sensitivity can create reproducible phase patterns that are not biological markers. The phase-alignment and augmentation stages are therefore not cosmetic preprocessing. They define which phase degrees of freedom the model is allowed to use. We remove arbitrary global inter-coil offsets, preserve spatial phase variation inside the signal support, and randomize the remaining common global phase during training. The intended target is thus a representation that can exploit relative and spatial phase while remaining insensitive to an arbitrary overall rotation.
-
-This distinction also motivates the magnitude-only baseline used here. The baseline represents the practical question faced by many imaging pipelines: should the complex acquisition be reduced to magnitude before diagnostic feature learning? A future information-matched control that supplies real and imaginary channels to a real network will be useful for distinguishing the value of phase information from the value of complex algebra itself. The present study first addresses the clinically common magnitude-versus-complex comparison under controlled model capacity.
-
-Answering that question requires more than comparing one arbitrary real network with one arbitrary complex network. Complex architectures contain several design choices that can strongly change their behavior. Complex convolution may be strictly complex-linear or widely linear; normalization may preserve global phase equivariance or whiten real-imaginary covariance; nonlinearities may preserve phase, gate magnitude, or independently threshold the Cartesian components; pooling may select a complex sample by its magnitude, use a robust median-like selection, or average the complex values; and the network may process only a complex stream or combine complex and magnitude streams. If these factors are not controlled, an observed difference between a real and a complex model can be confounded by model capacity or by one implementation choice.
-
-This work therefore treats complex-valued prostate MRI classification as one controlled, exhaustive factorial study. A fixed four-block real-valued CNN receiving coil magnitudes defines the reference model. Complex models are parameter matched to this baseline and vary along six architectural factors, yielding 480 complex configurations in addition to the real baseline. The single training realization for every configuration uses seed 10383. The factorial grid is the core experiment: its purpose is to characterize how representation and architectural inductive bias shape observed discrimination, not to establish a universal complex-network advantage.
-
-The central hypothesis is that the complex representation provides useful information and structure beyond magnitude alone. Importantly, this hypothesis has two separable interpretations. The first is an \emph{information hypothesis}: phase carries signal components that correlate with the PI-RADS-derived classification target. The second is an \emph{inductive-bias hypothesis}: even when the information could theoretically be encoded in a real representation, complex operations may make the relevant relationships easier to learn with finite data. The factorial design cannot fully disentangle all causal mechanisms, but it can test whether the effect is robust to important complex-network choices and whether particular phase-aware operations are associated with performance gains.
-
-The main contributions of this paper are as follows:
-\begin{itemize}
-    \item We formulate magnitude as an information-reducing map and distinguish its broad componentwise phase invariance from the common global $U(1)$ rotation enforced by augmentation and targeted by phase-compatible layers.
-    \item We provide a structured formulation of standard complex and widely-linear convolution, nonlinearities, normalization, pooling, and stream interactions as competing inductive biases.
-    \item We perform a parameter-matched 480-configuration factorial study that separates input representation from scalar parameter count under patient-disjoint train, validation, and test partitions.
-    \item We show that complex advantage is conditional: image-domain representation has the largest marginal contrast in the factorial grid, while normalization and stream design further modulate performance; the canonical max, median, and average models provide controlled pooling ablations.
-\end{itemize}
-
-The remainder of the paper is organized as follows. Section~\ref{sec:math} formulates the information and symmetry assumptions. Sections~\ref{sec:data}--\ref{sec:models} describe the dataset, preprocessing, and model family. Section~\ref{sec:design} defines the single factorial experiment and evaluation protocol. Section~\ref{sec:results} reports the completed factorial surface, and Sections~\ref{sec:discussion}--\ref{sec:conclusion} interpret its scope and implications.
-
-% =============================================================================
-\section{Mathematical and Information-Theoretic Formulation}\label{sec:math}
-% =============================================================================
-Let $Z$ denote the prepared complex four-coil input and $Y$ the PI-RADS-derived binary target. The magnitude representation is the many-to-one map
-\begin{equation}
-\mathcal{M}(Z)=|Z|.
-\label{eq:magnitude-map}
-\end{equation}
-It is invariant to an independent phase rotation at every component, $z_j\mapsto e^{i\alpha_j}z_j$. This invariance is much larger than the physically motivated nuisance symmetry used in the present experiment, namely a common rotation of all components, $Z\mapsto e^{i\alpha}Z$. The latter is the global $U(1)$ action. A phase-aware model may therefore preserve relative phase while becoming equivariant to the common rotation. Since magnitude is a deterministic function of the complex input, the data-processing inequality gives
-\begin{equation}
-I(Y;\mathcal{M}(Z))\le I(Y;Z),
-\label{eq:dpi}
-\end{equation}
-without implying that the inequality is strict for this dataset or task.
-
-For $z=x+iy$ and $W=A+iB$, standard complex multiplication is the constrained real-linear map
-\begin{equation}
-\begin{bmatrix}\Re(Wz)\\\Im(Wz)\end{bmatrix}
-=
-\begin{bmatrix}A&-B\\B&A\end{bmatrix}
-\begin{bmatrix}x\\y\end{bmatrix}.
-\label{eq:real-linear-complex}
-\end{equation}
-Thus standard complex convolution is not an unrestricted real-linear operator on the concatenated Cartesian channels; it is a structured hypothesis class. Widely-linear processing relaxes this constraint through
-\begin{equation}
-f(z)=W_1z+W_2z^*,
-\label{eq:widely-linear-form}
-\end{equation}
-and can represent a broader real-linear family.
-
-For a complex-linear layer and a magnitude-gated nonlinearity, the relevant equivariance is $G(e^{i\alpha}z)=e^{i\alpha}G(z)$. If the classifier reads out a magnitude, then the task-level output is invariant: $f(e^{i\alpha}z)=f(z)$. The random global-phase augmentation in Eq.~\eqref{eq:globalphase} encodes this common-rotation assumption even for configurations whose Cartesian activation or whitening operation is not exactly equivariant. These equations are a formulation of the design choices, not new theorem claims.
-
-Pooling makes the phase dependence of aggregation explicit. For $z_j=r_je^{i\phi_j}$, complex average pooling satisfies
-\begin{equation}
-\left|\frac{1}{n}\sum_jr_je^{i\phi_j}\right|^2
-=\frac{1}{n^2}\left(\sum_jr_j^2+2\sum_{j<k}r_jr_k\cos(\phi_j-\phi_k)\right).
-\label{eq:complex-average-coherence}
-\end{equation}
-Relative local phase coherence therefore affects the magnitude after averaging. Magnitude-max and magnitude-median pooling instead select an observed complex activation according to amplitude, preserving the selected phase without manufacturing a new phase by vector averaging.
-
-For a performance quantity $A$, let $\mathcal{G}$ denote the 480-model complex grid, let $N_{f,l}$ be the number of grid configurations at level $l$ of factor $f$, and let $N_{fg,l,m}$ be the number at the joint levels $(l,m)$. We use finite-grid descriptive main-effect and interaction quantities
-\begin{align}
-\bar A&=\frac{1}{|\mathcal{G}|}\sum_{q\in\mathcal{G}}A_q,\\
-\bar A_f(l)&=\frac{1}{N_{f,l}}\sum_{q\in\mathcal{G}:f(q)=l}A_q,\qquad
-\delta_f(l)=\bar A_f(l)-\bar A,\\
-\bar A_{fg}(l,m)&=\frac{1}{N_{fg,l,m}}\sum_{q\in\mathcal{G}:f(q)=l,\,g(q)=m}A_q,\\
-\delta_{fg}(l,m)&=\bar A_{fg}(l,m)-\bar A-\delta_f(l)-\delta_g(m).
-\label{eq:factor-effects}
-\end{align}
-They summarize the observed finite factorial surface; they are descriptive architectural evidence, not independent causal estimates or multiple hypothesis tests.
-
-% =============================================================================
-\section{Dataset and Problem Formulation}\label{sec:data}
-% =============================================================================
-\subsection{fastMRI Prostate Dataset}
-The fastMRI Prostate dataset extends the fastMRI resource to biparametric MRI and includes raw k-space, reconstructed images, and clinical labels~\cite{Tibrewala2024FastMRIProstate}. The full release contains T2-weighted and diffusion-weighted acquisitions collected from a clinical population. The present experiments use the prepared T2-weighted subset available to the training pipeline. Each learning sample is one reconstructed axial slice represented by four selected complex-valued coil channels. The loader accepts four complex coil channels and does not resize images; spatial dimensions are properties of the prepared samples supplied to the pipeline.
-
-The classification target follows the slice-level PI-RADS labels supplied with the prostate dataset. PI-RADS is a standardized assessment system for prostate MRI~\cite{Turkbey2019PIRADSv21}. We define the positive class as PI-RADS 3--5 and the negative class as PI-RADS 1--2, matching the binary grouping used in the prepared manifest. This target should be interpreted as classification of slices with higher radiological suspicion rather than a direct histopathological diagnosis of prostate cancer. The distinction is important because the labels originate from imaging assessment and therefore inherit the uncertainty and task definition of PI-RADS itself.
-
-Table~\ref{tab:cohort} summarizes the prepared cohort used by the current experiments. The dataset contains 8,225 slices from 270 patients. Patient identifiers are disjoint between training, validation, and test sets, preventing slices from a patient from appearing in more than one split. The class distribution is strongly imbalanced, with positive slices representing a small fraction of each partition. This imbalance motivates balanced sampling during training and the use of threshold-independent discrimination metrics for primary evaluation.
-
-\begin{table}[t]
-\centering
-\caption{Prepared T2-weighted cohort used in the current experiment. Patient identifiers are disjoint across splits.}
-\label{tab:cohort}
-\scriptsize
-\begin{tabular}{lrrrr}
-\toprule
-Split & Patients & Slices & PI-RADS 1--2 & PI-RADS 3--5 \\
-\midrule
-Training   & 189 & 5,672 & 5,373 & 299 \\
-Validation & 41  & 1,308 & 1,223 & 85 \\
-Test       & 40  & 1,245 & 1,182 & 63 \\
-\midrule
-Total      & 270 & 8,225 & 7,778 & 447 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-The full fastMRI Prostate release contains more subjects and slices than the prepared subset used here~\cite{Tibrewala2024FastMRIProstate}. The reduction is therefore a property of the present data-preparation pipeline and experimental cohort, not a description of the complete public dataset. For reproducibility, the experiment manifest records the sample path, patient identifier, binary label, split, and selected channels for every sample.
-
-\subsection{Complex Coil Representation and Phase Alignment}
-Let the four-coil complex image for a slice be
-\begin{align}
-\mathbf{x} &= [x_1,x_2,x_3,x_4], \\
-x_c(u,v) &= a_c(u,v)+\mathrm{i}b_c(u,v)
-           = r_c(u,v)\mathrm{e}^{\mathrm{i}\phi_c(u,v)},
-\end{align}
-where $c$ indexes the selected receiver coil. Coil phases can contain arbitrary global offsets that are unrelated to anatomy and may vary between acquisitions. Feeding such offsets directly to a phase-sensitive model can force the network to learn nuisance rotations and can obscure reproducible inter-coil phase relationships. The preprocessing therefore aligns the coil phases before model input.
-
-A signal support is first estimated from the \ac{RSS} magnitude. The implementation uses the 99th percentile of the signal magnitude as a robust scale and defines a foreground support relative to this scale. The first selected coil acts as the phase reference. A global phase is removed from the reference coil, after which each remaining coil is aligned to the reference through the cross-phase within the foreground support. Background values outside the estimated support are set to zero. This procedure removes arbitrary inter-coil offsets while retaining spatially varying phase structure inside the object.
-
-After phase alignment, every sample receives one shared robust magnitude scale. If $q_{0.99}$ denotes the sample's 99th percentile magnitude across the complex tensor, the scaled input is
-\begin{align}
-\tilde{\mathbf{x}} = \frac{\mathbf{x}}{q_{0.99}+\epsilon}.
-\end{align}
-The same scalar divides real and imaginary components and all four coils. Consequently, relative coil magnitudes and complex phase are preserved. Shared scaling is particularly important for the real-versus-complex comparison: independently normalizing real and imaginary components would change the geometry of the complex signal and introduce a preprocessing difference not present in the magnitude baseline.
-
-\begin{figure*}[!t]
-\centering
-\input{../figures_tikz/input_preprocessing.tex}
-\caption{Prepared complex input construction used by the loader. Four complex coil images are masked using an RSS-derived support, aligned to a reference coil through estimated global offsets, and divided by one shared robust magnitude scale. Complex models then receive either the aligned image-domain tensor or its centered orthonormal FFT; the latter is derived from the prepared images rather than read from untouched scanner k-space.}
-\label{fig:complexinput}
-\end{figure*}
-
-\subsection{Image-Space and k-Space Inputs}
-The factorial experiment includes two input domains for complex models. In the image-domain condition, the phase-aligned complex coil images are used directly. In the k-space condition, each complex coil image is transformed with a centered orthonormal two-dimensional Fourier transform,
-\begin{align}
-X_c(k_x,k_y)
-= \mathcal{F}_{\mathrm{c}}\{x_c(u,v)\},
-\end{align}
-implemented using an inverse shift, a two-dimensional \ac{FFT} with orthonormal normalization, and a final center shift. The resulting k-space tensor is then robustly scaled using the same shared-magnitude principle.
-
-The k-space arm is included to test whether a complex network benefits from operating closer to the acquisition domain. It is not equivalent to training on the raw, unprocessed fastMRI acquisition in every respect: the current prepared samples originate from the experiment's four-coil complex image representation and are transformed to k-space within the data loader. Thus, conclusions should be phrased as an image-domain versus Fourier-domain representation comparison under the current preprocessing, rather than as a comparison between clinical reconstruction and untouched scanner raw data.
-
-The real baseline receives magnitude only,
-\begin{align}
-\mathbf{x}_{\mathrm{real}} = |\tilde{\mathbf{x}}|\in\mathbb{R}^{4\times H\times W}.
-\end{align}
-This choice makes the reference model representative of the common practice of discarding phase while preserving coil-specific magnitude channels. The factorial grid does not include a separate real-valued k-space baseline. Accordingly, comparisons between image and k-space are made within the complex family; comparisons with the fixed real baseline use the canonical image-domain complex configuration as a controlled reference.
-
-\subsection{Global-Phase Augmentation}
-Complex models are augmented during training with a random global phase rotation,
-\begin{align}
-\tilde{\mathbf{x}}' = \tilde{\mathbf{x}}\,\mathrm{e}^{\mathrm{i}\theta},
-\qquad \theta\sim\mathcal{U}[-\pi,\pi].
-\label{eq:globalphase}
-\end{align}
-This augmentation leaves all magnitudes unchanged and therefore preserves the real baseline representation, while explicitly discouraging complex models from associating the target with an arbitrary absolute global phase. Validation and test data are not phase augmented. Conceptually, Eq.~\eqref{eq:globalphase} encodes the assumption that the label should be invariant to a common rotation of all complex channels, while relative and spatial phase patterns may remain informative.
-
-\subsection{Classification Task}
-For a slice input $\mathbf{x}$ and binary target $y\in\{0,1\}$, the model produces a scalar logit $s_\theta(\mathbf{x})$. The probability estimate is
-\begin{align}
-\hat p_\theta(y=1\mid\mathbf{x})
-= \sigma(s_\theta(\mathbf{x})),
-\end{align}
-where $\sigma(\cdot)$ is the logistic sigmoid. Training minimizes unweighted binary cross entropy at the sample level. Class imbalance is handled in the sampling distribution rather than by changing the loss: the training loader uses a weighted random sampler with equal total sampling mass assigned to the positive and negative classes. Therefore, rare positive slices are sampled more frequently while the validation and test distributions remain unchanged.
-
-The primary performance measure is test \ac{AUC}, which evaluates ranking independently of a fixed classification threshold. For threshold-dependent metrics, a threshold is selected on the validation set by maximizing balanced accuracy and is then frozen before test evaluation. This separation avoids choosing a test threshold after observing the held-out labels.
-
-\begin{figure*}[!t]
-\centering
-\resizebox{0.96\textwidth}{!}{\input{../figures_tikz/pipeline.tex}}
-\caption{Evaluation pipeline for the completed factorial study. Patient-disjoint partitions and preprocessing are fixed before model fitting. Validation AUC selects the checkpoint and validation balanced accuracy selects the threshold; the fixed test cohort is evaluated only after those choices are frozen.}
-\label{fig:pipeline}
-\end{figure*}
-
-% =============================================================================
-\section{Complex-Valued Classification Models}\label{sec:models}
-% =============================================================================
-\subsection{Parameter-Matched Real-Valued Baseline}
-The reference network is a compact four-stage \ac{CNN} receiving the four coil magnitudes. Its channel widths are
-\begin{align}
-45 \rightarrow 91 \rightarrow 181 \rightarrow 272.
-\end{align}
-Each stage contains two $3\times3$ real convolutions, each followed by batch normalization and a SiLU nonlinearity. A $2\times2$ max-pooling operation follows each of the first three stages. After the fourth stage, adaptive global average pooling reduces the feature maps to a channel vector. Dropout with probability $0.2$ is applied immediately before a one-unit linear classification head.
-
-This architecture contains 1,685,890 trainable scalar parameters. It is deliberately smaller than common large image-classification backbones. The goal of the study is not to maximize benchmark performance through scale, but to compare representational choices under closely controlled capacity. The real model therefore establishes a fixed parameter budget against which every complex configuration is matched.
-
-\subsection{Standard Complex Convolution}
-For an input $z=x_r+\mathrm{i}x_i$ and complex kernel $W=W_r+\mathrm{i}W_i$, standard complex convolution is implemented with real convolutions as
-\begin{align}
-W*z
-&=(W_r*x_r-W_i*x_i) \\
-&\quad+\mathrm{i}(W_r*x_i+W_i*x_r).
-\label{eq:complexconv}
-\end{align}
-Unlike treating $x_r$ and $x_i$ as unrelated feature channels, Eq.~\eqref{eq:complexconv} ties the real-imaginary interactions according to complex multiplication. A common complex rotation of the input therefore propagates in a structured way through a sequence of complex-linear layers. This is one of the principal inductive biases under investigation.
-
-The canonical complex network uses channel widths
-\begin{align}
-32 \rightarrow 64 \rightarrow 128 \rightarrow 192,
-\end{align}
-with two complex $3\times3$ convolutions per stage. For the canonical RMSNorm/standard-convolution/complex-only configuration these widths produce 1,681,473 trainable scalar parameters, within 1\% of the real baseline. Architectures that introduce additional convolutional weights, such as widely-linear or dual-stream variants, use automatically selected channel widths so that the same parameter-matching criterion is satisfied.
-
-\subsection{Widely-Linear Complex Convolution}
-Strict complex linearity may be unnecessarily restrictive for signals that are not circularly symmetric in the complex plane. Widely-linear estimation augments the complex input with its conjugate and has a long history in complex signal processing~\cite{Picinbono1995WidelyLinear}. The implemented layer has the form
-\begin{align}
-y = W_1*z + W_2*z^*,
-\label{eq:wl}
-\end{align}
-where $z^*$ denotes complex conjugation. Equation~\eqref{eq:wl} can represent a broader family of real-linear transformations than standard complex convolution, at the cost of additional weights. Parameter matching therefore narrows the corresponding channel widths to keep scalar model capacity comparable to the real baseline.
-
-The factorial comparison between standard and widely-linear convolution tests whether strict complex structure is beneficial for the present MRI task or whether the additional flexibility of conjugate interactions improves discrimination. A gain from widely-linear convolution would suggest that the useful relationships are complex-valued but not well modeled by strictly complex-linear transformations alone.
-
-\subsection{Complex Normalization}
-Two normalization schemes are evaluated. The first is the implemented complex RMS normalization. For each channel, the layer computes the mean complex power $|z|^2=\Re(z)^2+\Im(z)^2$ over batch and spatial dimensions during training, updates a running channel-power statistic, and uses that running statistic at evaluation. A learned channel-wise log scale is exponentiated to give a positive gain. In compact notation,
-\begin{align}
-\operatorname{RMSNorm}(z)
-&= z\,\exp(\ell)\left(p_t+\epsilon\right)^{-1/2},\\
-p_t &=
-\begin{cases}
-\displaystyle p_{\mathrm{batch}}, & \text{training},\\[2pt]
-p_{\mathrm{run}}, & \text{evaluation},
-\end{cases}
-\end{align}
-where $p_{\mathrm{batch}}$ is the current channel power averaged over batch and spatial dimensions, $p_{\mathrm{run}}$ is the running channel-power statistic, and $\ell$ is the learned log scale. During training, the running statistic is updated with the implementation's momentum; during evaluation it is held fixed. Since this normalization depends on magnitude rather than absolute phase, it is compatible with global phase rotations.
-
-The second alternative is complex batch normalization based on whitening the real-imaginary pair. Let $\mu_r$ and $\mu_i$ denote batch means and let
-\begin{align}
-\mathbf{V}=
-\begin{bmatrix}
-V_{rr} & V_{ri}\\
-V_{ri} & V_{ii}
-\end{bmatrix}
-\end{align}
-be the $2\times2$ covariance of the Cartesian components for a channel. Complex batch normalization applies an inverse square-root transform to approximately whiten the pair, followed by a learnable affine transformation. This approach follows the general complex-normalization framework of Trabelsi \emph{et al.}~\cite{Trabelsi2018DeepComplex}. It can normalize correlated real and imaginary components more completely than RMS scaling, but it introduces batch-statistics dependence and a less direct phase-equivariant interpretation.
-
-\subsection{Complex Activation Functions}
-Four activation functions are included because nonlinearity is one of the central unresolved design choices in complex networks.
-
-\subsubsection{modReLU}
-The canonical activation is modReLU, originally introduced for unitary recurrent networks~\cite{Arjovsky2016Unitary}. For $z\neq0$,
-\begin{align}
-\operatorname{modReLU}(z)
-= z\frac{\operatorname{ReLU}(|z|+b)}{|z|+\epsilon},
-\label{eq:modrelu}
-\end{align}
-where $b$ is learnable. The operation gates magnitude while preserving the phase of active units. This property makes it a natural baseline when one wants the nonlinear network to maintain phase equivariance as far as possible.
-
-\subsubsection{Magnitude-gated SiLU}
-The magnitude-gated SiLU variant multiplies the complex activation by a sigmoid gate derived from its magnitude,
-\begin{align}
-\operatorname{MagSiLU}(z)
-= z\,\sigma\left(a(|z|-b)\right),
-\end{align}
-with learnable parameters controlling the gate. As with modReLU, the complex direction of $z$ is unchanged while its amplitude is modulated. Its smoother gate may improve optimization relative to a rectified magnitude threshold.
-
-\subsubsection{CReLU}
-The Cartesian ReLU applies conventional ReLU independently to the two components,
-\begin{align}
-\operatorname{CReLU}(z)
-= \operatorname{ReLU}(\Re z)
-+\mathrm{i}\operatorname{ReLU}(\Im z).
-\end{align}
-This activation is simple and expressive but does not preserve a common phase rotation. It therefore provides a useful contrast: if CReLU performs well, strict phase equivariance may not be necessary even when complex input is retained.
-
-\subsubsection{Cardioid}
-The cardioid activation uses the phase angle to scale the complex value,
-\begin{align}
-\operatorname{Cardioid}(z)
-= \frac{1}{2}\left(1+\cos(\angle z)\right)z.
-\end{align}
-Phase-dependent complex activations have previously been explored in MRI applications~\cite{Virtue2017ComplexActivation}. In the present grid, the cardioid condition tests whether explicitly phase-selective gating improves classification over phase-preserving magnitude gates.
-
-\subsection{Complex Pooling}
-Downsampling complex-valued feature maps requires a definition of order or aggregation because complex numbers do not have a natural total ordering. Three alternatives are implemented.
-
-\textit{Magnitude max pooling} identifies the element of each $2\times2$ window with the largest magnitude and returns the corresponding full complex value. Phase is therefore retained for the selected unit. \textit{Magnitude median pooling} ranks the four elements by magnitude and returns an observed complex activation at the median rank. This operation is intended to reduce sensitivity to isolated high-amplitude activations while still returning an actual complex sample rather than manufacturing a phase through averaging. For an even four-element window, the implementation uses the lower median rank. \textit{Complex average pooling} averages real and imaginary components over the window, equivalent to averaging the complex values directly.
-
-The canonical complex model uses magnitude-median pooling. This is a controlled ablation defined before interpreting the factorial results, not a post hoc selection rule. The max and average variants remain important ablations because pooling can determine how localized phase patterns survive spatial downsampling.
-
-\subsection{Single- and Dual-Stream Feature Extraction}
-The complex-only architecture contains four complex convolutional blocks with three intermediate pooling operations. After the third block, an optional holographic interaction module can be inserted. The final complex feature map is adaptively pooled after converting it to magnitude, and a real-valued linear head produces the binary logit. Thus, complex information is preserved throughout convolutional feature extraction and converted to a real invariant representation only near the classifier.
-
-The dual-stream architecture processes both a real magnitude stream and a complex stream. The real branch uses conventional real-valued convolutional blocks, while the complex branch uses the selected complex operations. At the output, pooled real features are concatenated with magnitudes of the pooled complex features before classification. This design tests whether magnitude and phase-aware features are complementary rather than mutually exclusive representations.
-
-Three interaction choices are used in the dual stream. With \textit{none}, the branches are independent until final fusion. With \textit{modulus gate}, the magnitude of the complex branch is transformed into a sigmoid spatial gate that modulates the real branch. With \textit{holographic interaction}, the complex branch contains an interference-aware attention operation. Complex-only models support either no interaction or holographic interaction; modulus gating is undefined without a real branch and is therefore excluded from that stream type.
-
-\subsection{Interference-Aware Holographic Interaction}
-The holographic module uses complex query, key, and value projections. For query $q_i$ and key $k_j$ with embedding dimension $d$, the similarity component is the real part of the Hermitian inner product,
-\begin{align}
-s_{ij}^{(H)}
-= \frac{\Re\{q_i k_j^H\}}{\sqrt{d}}.
-\end{align}
-The implementation additionally penalizes squared Euclidean distance between the query and key magnitude vectors, not distance between the full complex vectors,
-\begin{align}
-s_{ij}=s_{ij}^{(H)}
--\gamma\frac{\|\lvert q_i\rvert-\lvert k_j\rvert\|_2^2}{d},
-\label{eq:holo}
-\end{align}
-with $\gamma=1$ in the current experiment. Softmax-normalized scores aggregate the complex values, followed by a residual connection and complex normalization. The Hermitian similarity retains complex directional information, while the auxiliary penalty compares amplitude geometry. The module is intended to make complex similarity and magnitude compatibility explicit, but its value for MRI classification is an exploratory question rather than an assumption of the study.
-
-\begin{figure*}[!t]
-\centering
-\input{../figures_tikz/architecture.tex}
-\caption{Model-family schematic. The real baseline uses magnitude channels and conventional real blocks. Complex-only models retain complex features until magnitude readout, while dual-stream models fuse pooled real features with pooled complex magnitudes and may apply modulus gating or holographic interaction. Exact widths are selected per configuration to satisfy the implemented parameter-matching tolerance.}
-\label{fig:architecture}
-\end{figure*}
-
-\begin{table*}[t]
-\centering
-\caption{Representative architecture definitions and parameter-budget role. Exact widths for noncanonical factorial variants are recorded per run after automatic parameter matching.}
-\label{tab:architectures}
-\scriptsize
-\begin{tabularx}{\textwidth}{L{3.0cm}L{3.2cm}L{2.8cm}L{2.5cm}X}
-\toprule
-Model & Input / stream & Canonical widths & Trainable scalars & Main distinction \\
-\midrule
-Real baseline & 4 magnitude channels & 45/91/181/272 & 1,685,890 & Real conv + BatchNorm + SiLU + max pool \\
-Canonical complex & 4 complex channels, complex-only & 32/64/128/192 & 1,681,473 & Standard complex conv + RMSNorm + modReLU; pooling varied \\
-Widely-linear variants & Complex-only or dual & automatically matched & within 1\% of real & Adds $z^*$ pathway; widths reduced to offset additional kernels \\
-Dual-stream variants & Magnitude + complex & automatically matched & within 1\% of real & Parallel real/complex feature extraction with optional interaction \\
-\bottomrule
-\end{tabularx}
-\end{table*}
-
-\begin{table*}[t]
-\centering
-\caption{Factors in the complex-valued factorial grid. Their Cartesian product contains 480 valid complex configurations.}
-\label{tab:grid}
-\scriptsize
-\begin{tabularx}{\textwidth}{L{2.9cm}L{4.2cm}X}
-\toprule
-Factor & Levels & Intended question \\
-\midrule
-Input domain & Image; k-space & Does the representation closer to Fourier/acquisition space improve complex learning? \\
-Pooling & Magnitude max; magnitude median; complex average & Which downsampling rule best preserves useful complex structure? \\
-Normalization & Complex RMSNorm; complex BatchNorm & Is phase-compatible power scaling or real-imaginary whitening more effective? \\
-Convolution & Standard; widely linear & Is strict complex linearity sufficient, or are conjugate interactions beneficial? \\
-Activation & modReLU; magnitude-gated SiLU; CReLU; cardioid & Are phase-preserving, Cartesian, or phase-selective nonlinearities preferable? \\
-Streams/interaction & Complex-only/none; complex-only/holographic; dual/none; dual/modulus-gate; dual/holographic & Does magnitude provide a complementary stream, and do explicit cross-feature interactions help? \\
-\bottomrule
-\end{tabularx}
-\end{table*}
-
-% =============================================================================
-\section{Experimental Design}\label{sec:design}
-% =============================================================================
-\subsection{Factorial Grid}
-The experiment comprises one fixed real magnitude baseline and the exhaustive complex grid in Table~\ref{tab:grid}. Its Cartesian product is
-\begin{align}
-2\times3\times2\times2\times4\times5=480
-\end{align}
-complex configurations, giving 481 completed runs in total. The factors are input domain (image or Fourier), pooling (magnitude max, magnitude median, or complex average), normalization (complex RMSNorm or complex BatchNorm), convolution (standard or widely linear), activation (modReLU, magnitude-gated SiLU, CReLU, or cardioid), and stream/interaction (complex-only/none, complex-only/holographic, dual/none, dual/modulus-gate, or dual/holographic). The grid is exhaustive over these implemented levels; modulus gating is structurally restricted to the dual stream.
-
-The purpose of the grid is to characterize how complex-valued MRI classification depends on representation and architectural inductive bias. Every configuration is evaluated on the same patient-disjoint train, validation, and held-out test partitions. The three canonical keys \texttt{complex\_max}, \texttt{complex\_median}, and \texttt{complex\_average} isolate pooling while holding the other canonical factors fixed; they are controlled ablations within the factorial study, not a separate hierarchy of claims.
-
-\subsection{Parameter Matching}
-The real baseline contains 1,685,890 trainable scalar parameters. For each complex configuration, channel widths are treated as dependent design variables and selected by the implementation's width-search routine. The resolved configuration records exact widths and parameter count, and a model is accepted when its count is within 1\% of the real baseline. This controls the principal capacity confound: complex layers are implemented with multiple real-valued kernels, so naive width copying could otherwise create a parameter advantage unrelated to representation or inductive bias.
-
-\subsection{Optimization and Model Selection}
-
-Training uses AdamW~\cite{Loshchilov2019AdamW} with learning rate $10^{-3}$ and weight decay $10^{-4}$. The maximum number of epochs is 100. Mini-batch size is 8 with four gradient-accumulation steps, giving an effective optimization batch of 32 samples. The loss is unweighted \ac{BCE} with logits. As described in Section~\ref{sec:data}, a weighted random sampler approximately balances positive and negative sampling mass during training.
-
-Early stopping patience is eight epochs. Checkpoint selection is based on validation AUC; if the AUC is undefined in an exceptional validation state, validation loss provides a fallback ordering. After the best checkpoint is restored, the classification threshold is optimized on the validation set for balanced accuracy. That threshold is then applied unchanged to the test set. No test metric is used to choose the checkpoint, hyperparameters, model threshold, or a selected complex configuration.
-
-The real network and all complex networks use dropout probability 0.2 immediately before their final classifier. The current complex augmentation is the global phase rotation in Eq.~\eqref{eq:globalphase}; the training code does not apply the geometric rotation/translation/flip augmentation stated in an earlier manuscript draft. Keeping the manuscript synchronized with the implementation is particularly important here because spatial augmentation can alter the effective invariances being tested.
-
-\subsection{Evaluation Metrics}
-For every model, the evaluation pipeline records accuracy, balanced accuracy, sensitivity, specificity, precision, F1 score, AUC, and average precision. Given the strong class imbalance, ordinary accuracy is not emphasized. AUC is the main threshold-independent discrimination metric, while average precision is prominent because it is sensitive to performance in the positive minority class. Sensitivity and specificity use the validation-selected threshold and are reported to expose clinically relevant tradeoffs hidden by a single scalar discrimination metric.
-
-For a model $m$, denote the observed test AUC by $A_m$. The factorial summaries report $A_m$ directly, along with descriptive differences from the fixed real-baseline AUC. No seed-level confidence interval, sign-flip test, or claim of optimization robustness is appropriate because each architecture has one training realization at fixed seed 10383. The observed differences characterize the completed factorial surface only.
-
-\subsection{Exploratory Factorial Analysis}
-The full 480-model grid is used to examine which complex architectural choices are associated with stronger performance. For each configuration $m$, the observed test-AUC difference from the real baseline is descriptive. Configurations can be ranked by their single-run AUC, while factor-level summaries aggregate performance over all configurations sharing a level, for example standard versus widely-linear convolution or image versus Fourier input.
-
-These summaries are exploratory because the same held-out test set contributes to a large number of comparisons. The grid is designed for hypothesis generation and architectural understanding, not for declaring 480 independent discoveries. The Results section therefore reports effect patterns, factorial performance patterns, and a limited number of representative high-performing configurations rather than emphasizing the single numerically best run. If a configuration discovered through this grid is proposed for further study, it should be evaluated in a subsequent independent experiment or external dataset.
-
-\subsection{Reproducibility and Experiment Outputs}
-Each run writes its resolved configuration, exact trainable parameter count, metrics, and completion status. The aggregation stage produces model summaries, descriptive baseline differences, and metadata for the completed 481-run experiment. Failed attempts are retained instead of overwritten, allowing errors to be traced without silently replacing unsuccessful runs. The cluster launcher also records the model grid and submission provenance.
-
-The code architecture is particularly useful for manuscript reproducibility because every named factor in Table~\ref{tab:grid} maps to an explicit model option. The numerical tables in Section~\ref{sec:results} are populated directly from the supplied factorial CSV rather than manually transcribing individual runs.
-
-\begin{table}[t]
-\centering
-\caption{Fixed training and evaluation protocol.}
-\label{tab:training}
-\scriptsize
-\begin{tabular}{ll}
-\toprule
-Setting & Value \\
-\midrule
-Optimizer & AdamW \\
-Learning rate & $10^{-3}$ \\
-Weight decay & $10^{-4}$ \\
-Maximum epochs & 100 \\
-Batch size & 8 \\
-Gradient accumulation & 4 \\
-Effective batch size & 32 \\
-Early-stopping patience & 8 epochs \\
-Checkpoint criterion & Validation AUC \\
-Training imbalance control & Weighted random sampler \\
-Loss & BCE with logits \\
-Threshold selection & Max. validation balanced accuracy \\
-Dropout before classifier & 0.2 \\
-Random seed & 10383 \\
-Reported runs & 481 completed runs \\
-Primary metric & Test AUC, with average precision emphasized \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\begin{figure*}[!t]
-\centering
-\input{../figures_tikz/factorial_design.tex}
-\caption{Exhaustive factorial design. The six implemented factors form a Cartesian product of 480 complex configurations; the stream/interaction choice is one five-level combined factor. A fixed real magnitude baseline supplies the reference parameter budget, and every run uses seed 10383 and the same patient-disjoint partitions.}
-\label{fig:grid}
-\end{figure*}
-
-% =============================================================================
-\section{Results}\label{sec:results}
-% =============================================================================
-The factorial results below are regenerated from the completed rows of \texttt{test\_metrics\_all\_runs.csv}: one real baseline and 480 complex configurations. AUC is retained as the main discrimination metric, while average precision (AP) is shown alongside it because the test cohort is strongly imbalanced. The factorial grid was screened on one fixed patient test cohort; consequently, all factorial and high-performing-configuration statements are descriptive and exploratory. No factorial statistical-significance claim is made.
-
-\subsection{Overall Factorial Performance}
-The real magnitude baseline achieved test AUC \RealAUC. The complex grid ranged from AUC \ComplexMinAUC to \BestAUC, with mean AUC \ComplexMeanAUC and mean AP \ComplexMeanAP. Only \ComplexWins/\ComplexTotal complex configurations exceeded the real-baseline AUC, so complex representation alone is insufficient to guarantee an improvement. Figure~\ref{fig:factorial_landscape} makes this conditional distribution visible: image-domain models are concentrated at higher AUC than Fourier-domain models, but the image distribution also contains substantial within-domain variation.
-
-\begin{figure}[!t]
-\centering
-\input{../figures_tikz/factorial_auc_landscape.tex}
-\caption{factorial test-AUC landscape across all 480 complex configurations, separated by image and Fourier-domain input. The dashed line is the real-baseline AUC.}
-\label{fig:factorial_landscape}
-\end{figure}
-
-\begin{table}[t]
-\centering
-\caption{Direct factorial performance summary from the supplied CSV.}
-\label{tab:factorialsummary}
-\scriptsize
-\begin{tabular}{lcc}
-\toprule
-Summary & AUC & AP\\
-\midrule
-Real magnitude baseline & \RealAUC & \RealAP\\
-All complex configurations (mean) & \ComplexMeanAUC & \ComplexMeanAP\\
-Image-domain complex (mean) & \ImageAUC & \ImageAP\\
-Fourier-domain complex (mean) & \FourierAUC & \FourierAP\\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\subsection{Image-Domain versus Fourier-Domain Representation}
-The largest marginal contrast in the factorial grid is input representation. Image-domain complex models had mean AUC \ImageAUC, whereas Fourier-domain models had mean AUC \FourierAUC. This difference is not interpreted as information loss caused by the FFT: the centered orthonormal FFT is information-preserving, and both arms begin with the same prepared complex images. Rather, the result is evidence of an architecture--representation interaction. The convolutional hierarchy, pooling, normalization, and final spatial aggregation may be better aligned with the prepared image-domain geometry than with the corresponding Fourier-domain geometry. Image-domain complex models also had mean AP \ImageAP versus \FourierAP in Fourier space, reinforcing the need to interpret the AUC difference jointly with minority-class precision.
-
-\subsection{Factorial Main Effects and Interactions}
-For the finite complex grid, let $A_q$ denote test AUC for configuration $q$. The quantities in Eq.~\eqref{eq:factor-effects} are finite-grid averages over configurations sharing a factor level; they describe the observed factorial surface rather than establish isolated causal effects. Figure~\ref{fig:factorinteractions} combines marginal effects with the two interactions most relevant to the interpretation.
-
-\begin{figure*}[!t]
-\centering
-\input{../figures_tikz/factor_effects.tex}
-\caption{Descriptive factorial factor effects and interactions. The left panel shows selected marginal AUC contrasts relative to the overall complex mean; the middle panel shows domain $\times$ normalization; the right panel shows the implemented five-level stream/interaction factor (not two independent factors). All summaries average over the remaining factorial dimensions.}
-\label{fig:factorinteractions}
-\end{figure*}
-
-The domain-by-normalization interaction is informative. Complex BatchNorm averaged AUC \ImageBatchnormAUC in image space versus \ImageRmsAUC for RMSNorm; in Fourier space the corresponding means were \KspaceBatchnormAUC and \KspaceRmsAUC. Thus BatchNorm was stronger overall and its contrast with RMSNorm was larger in image space, consistent with the possibility that real-imaginary covariance whitening is helpful in the representation where the rest of the network is most effective. This is an association, not evidence that strict phase-equivariant normalization is universally undesirable.
-
-The domain-by-stream/interaction summaries show a similarly conditional pattern. In image space, the means for complex-only/no interaction, complex-only/holographic, dual/no interaction, dual/modulus-gate, and dual/holographic were respectively \ImageComplexOnlyNoneAUC, \ImageComplexOnlyHolographicAUC, \ImageDualNoneAUC, \ImageDualModulusGateAUC, and \ImageDualHolographicAUC. In Fourier space they were \KspaceComplexOnlyNoneAUC, \KspaceComplexOnlyHolographicAUC, \KspaceDualNoneAUC, \KspaceDualModulusGateAUC, and \KspaceDualHolographicAUC. Dual-stream processing is promising mainly in image space; the same stream designs do not transfer their advantage to Fourier space. The holographic interaction is therefore not a universal improvement, and its magnitude-distance implementation should not be described as a full complex-vector distance.
-
-The remaining marginal effects are modest relative to the domain contrast. Standard convolution averaged AUC \ConvStandardAUC versus \ConvWidelyLinearAUC for widely-linear convolution. ModReLU averaged \ActModreluAUC, compared with \ActMagnitudeSiluAUC for magnitude-gated SiLU, \ActCreluAUC for CReLU, and \ActCardioidAUC for cardioid. These averages do not imply a universal activation ordering: activation and pooling effects are interaction-dependent.
-
-\begin{table*}[t]
-\centering
-\caption{Formal factorial-level AUC summaries regenerated from the 480 complex configurations. The stream/interaction rows are the implemented five-level combined factor, not two independent factorial factors. The final column is the mean AUC minus the real-baseline AUC; all values are descriptive architectural evidence.}
-\label{tab:factorresults}
-\scriptsize
-\begin{tabular}{llrrr}
-\toprule
-Factor & Level & Configurations & Mean AUC & Mean $\Delta$AUC vs. real\\
-\midrule
-\FactorTableRows
-\bottomrule
-\end{tabular}
-\end{table*}
-
-\FloatBarrier
-\subsection{Canonical Pooling Ablation}
-For the controlled pooling ablation, a canonical configuration fixes image-domain input, RMSNorm, standard convolution, a complex-only stream, no interaction, and modReLU while varying the pooling rule. The three canonical pooling choices are controlled ablations within the factorial grid. Table~\ref{tab:canonicalresults} reports the four canonical rows directly from the CSV. The canonical max AUC was \CanonicalMaxAUC, the canonical median AUC was \CanonicalMedianAUC, and the canonical average AUC was \CanonicalAverageAUC; the median is therefore approximately tied with the real baseline in the completed experiment. AP follows a different ordering, which is why both metrics are shown.
-
-\begin{table}[t]
-\centering
-\caption{Canonical factorial comparison. Values are single fixed-test-cohort results from one training realization per architecture.}
-\label{tab:canonicalresults}
-\scriptsize
-\begin{tabular}{lccccc}
-\toprule
-Model & AUC & AP & Bal. acc. & Sens. & Spec.\\
-\midrule
-\CanonicalTableRows
-\bottomrule
-\end{tabular}
-\end{table}
-
-\begin{figure}[!b]
-\centering
-\input{../figures_tikz/canonical_comparison.tex}
-\caption{Canonical factorial comparison with aligned horizontal dot plots for AUC and average precision. The separate scales preserve AP readability; Table~\ref{tab:canonicalresults} additionally reports threshold-dependent operating metrics.}
-\label{fig:canonical}
-\end{figure}
-
-The canonical pooling ordering should not be generalized to every architecture. Magnitude-max preserves the phase of the strongest local activation, median selection suppresses isolated amplitude outliers while returning an observed complex value, and averaging rewards local phase coherence through Eq.~\eqref{eq:complex-average-coherence}. Which behavior is useful depends on the normalization, activation, stream design, and input domain with which the pooling operator is combined.
-
-\FloatBarrier
-\subsection{High-Performing Exploratory Configurations}
-The highest factorial AUC was \BestAUC for configuration \texttt{\BestLabel}, with AP \BestAP. It is reported as an exploratory observation only because all 480 configurations were evaluated on the same fixed test cohort. Table~\ref{tab:topconfigs} gives a small, regenerated top-AUC list for architectural context; it is not a leaderboard and does not redefine the fixed real-baseline reference. The strongest rows are concentrated in image space and include BatchNorm, but the table alone cannot establish which factor caused their performance.
-
-\begin{table*}[t]
-\centering
-\caption{Small exploratory top-AUC list from the factorial fixed test cohort. These rows are hypothesis-generating, not externally validated winners.}
-\label{tab:topconfigs}
-\scriptsize
-\begin{tabular}{rlccp{7.1cm}}
-\toprule
-Rank & Configuration & AUC & AP & Decoded factors (domain / pooling / normalization / streams / interaction / activation)\\
-\midrule
-\TopTableRows
-\bottomrule
-\end{tabular}
-\end{table*}
-
-\begin{figure}[!b]
-\centering
-\input{../figures_tikz/auc_ap_scatter.tex}
-\caption{Test AUC versus average precision across complex configurations. Color separates image- and Fourier-domain models; the real baseline, the three canonical pooling models, and only the strongest exploratory configuration receive emphasized markers.}
-\label{fig:aucap}
-\end{figure}
-
-\section{Discussion}\label{sec:discussion}
-% =============================================================================
-The factorial experiment does not support a universal advantage for complex-valued networks. Instead, it shows that the utility of complex MRI information depends strongly on architectural choices. Only a minority of configurations exceeded the real baseline, and the largest marginal contrast was the superiority of image-domain over Fourier-domain processing. Complex BatchNorm and image-domain magnitude/complex feature processing were also associated with stronger performance. Access to complex information can therefore be useful, but strict phase equivariance or complex arithmetic alone is not sufficient to guarantee improved diagnostic discrimination.
-
-The image--Fourier contrast should be interpreted as an architecture--representation interaction. The Fourier transform used here is centered, orthonormal, and information-preserving, so the lower Fourier-domain mean cannot be attributed to discarding information by the transform itself. The learned local convolutions, spatial pooling, normalization statistics, and final aggregation see a different geometry in the two domains. The result does not imply that image-domain processing is universally preferable for all MRI tasks, nor that phase is irrelevant: image-domain complex inputs retain phase and can still benefit from phase-aware processing.
-
-The normalization and stream results refine this interpretation. Complex BatchNorm was stronger than RMSNorm overall, with the largest contrast in image space, suggesting that real-imaginary covariance treatment can matter under the present data and model budget. Dual-stream processing was promising mainly in image space, where magnitude features and complex features may provide complementary spatial cues. Standard versus widely-linear convolution differed only modestly on average, so the data do not support a strong claim that conjugate flexibility is generally required. Activation and pooling effects changed with domain and stream context, which is precisely why the factorial design is more informative than a single architecture comparison.
-
-The canonical median model is an approximately tied controlled pooling ablation relative to the real baseline. The observed maximum is not a confirmed clinical model: screening 480 configurations on the same test cohort creates substantial selection opportunity. The top configuration is therefore useful for hypothesis generation, not for a leaderboard claim and not as evidence that the network discovered a biological phase biomarker. Any future promotion of an exploratory architecture requires a pre-registered follow-up with patient-level uncertainty and independent data.
-
-Average precision is essential context. The test set is strongly imbalanced, so AUC can remain favorable while positive-class precision is modest. AUC is retained as the main discrimination metric because it is threshold-independent; AP, sensitivity, specificity, and balanced accuracy expose complementary operating characteristics after the threshold is selected on validation data only. No single metric should be treated as a clinical performance claim.
-
-The same fixed test cohort is used across all 480 complex configurations, so the high-performing configurations are subject to model-selection optimism. A patient-cluster bootstrap of stored predictions would quantify finite-cohort uncertainty, while an external cohort or an independent patient split would be needed to assess transportability. The current test set contains correlated slices within patients, so slice-level metrics should not be mistaken for patient-level diagnostic accuracy. In addition, one training realization per architecture does not quantify variability due to stochastic initialization, sampling order, or optimization.
-
-The findings are also bounded by the control design. The real baseline is magnitude-only; it does not separate the value of retaining real-imaginary information from the value of complex algebra. A future information-matched real network receiving Cartesian channels would address that question. The study uses a prepared four-coil subset rather than all available coils, and the Fourier arm is derived by FFT from prepared complex images rather than from untouched scanner k-space. Phase alignment removes estimated global inter-coil offsets and augmentation removes sensitivity to a common global phase, but neither operation eliminates scanner, coil-sensitivity, motion, or reconstruction confounding. External validation across sites and acquisition protocols is consequently important before making clinical or biological claims.
-
-\section{Conclusion}\label{sec:conclusion}
-% =============================================================================
-This paper develops a controlled framework for testing complex-valued neural networks on prostate MRI classification. A fixed magnitude-only real CNN is compared with 480 parameter-matched complex configurations spanning representation domain, pooling, normalization, convolution, activation, and stream/interaction choices. The completed factorial CSV shows that only \ComplexWins/\ComplexTotal complex configurations exceed the real-baseline AUC of \RealAUC. Image-domain complex models average \ImageAUC AUC versus \FourierAUC for Fourier-domain models, and the canonical median model is approximately tied with the real baseline at \CanonicalMedianAUC. The factorial maximum of \BestAUC is explicitly exploratory.
-
-The achieved conclusion is therefore conditional: preserving complex information creates the possibility of improved discrimination, but complex arithmetic alone does not guarantee it. Image-domain representation has the largest marginal contrast, while Complex BatchNorm and image-domain magnitude/complex stream design further modulate performance. The evidence supports an architecture-dependent information-preservation/inductive-bias hypothesis rather than a universal advantage of complex networks, a claim of strict phase-equivariance superiority, or evidence of a biological phase biomarker. The canonical pooling models remain controlled ablations. Independent patient-level or external validation remains necessary.
+\input{sections/01_introduction.tex}
+\input{sections/02_mathematical_formulation.tex}
+\input{sections/03_dataset_task.tex}
+\input{sections/04_models.tex}
+\input{sections/05_experimental_design.tex}
+\input{sections/06_results.tex}
+\input{sections/07_discussion.tex}
+\input{sections/08_conclusion.tex}
+
+% These appendices are intentionally modular so they can later be moved to a
+% supplementary document or an expanded arXiv version without rewriting the
+% main manuscript.
+\appendices
+\input{sections/A_operator_properties.tex}
+\input{sections/B_dataset_notes.tex}
 
 \section*{Acknowledgment}
 \textit{Funding sources, collaborators, institutional acknowledgments, and data-use acknowledgments to be completed before submission.}
@@ -645,9 +74,6 @@ The achieved conclusion is therefore conditional: preserving complex information
   \newpage
 \fi
 \bibliographystyle{IEEEtran}
-\bibliography{../paper/Bibliography}
-
-% Biography blocks from the exemplar template were intentionally removed from
-% this first draft because the final author list has not yet been supplied.
+\bibliography{Bibliography}
 
 \end{document}

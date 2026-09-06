@@ -10,3 +10,6 @@ data/
 runs/
 *.pt
 paper/
+**/qa_render**
+**.aux
+**.log

@@ -1,0 +1,44 @@
+% =============================================================================
+\section{Expanded Algebraic Properties of the Factorial Operators}\label{app:operators}
+% =============================================================================
+% SUPPLEMENT-CANDIDATE: this appendix can be moved intact to supplementary material.
+This appendix collects short symmetry checks that are useful for an expanded version but can be removed from a page-limited submission. The checks connect the implemented operators to established CVNN families---magnitude-gated activations~\cite{Arjovsky2016Unitary,Lee2022CVNNSurvey}, split activations~\cite{Nitta1997ComplexBP,Scardapane2020ComplexActivations}, widely-linear processing~\cite{Picinbono1995WidelyLinear}, and complex attention~\cite{Eilers2023ComplexTransformer}---while keeping the study-specific adaptations explicit.
+
+\subsection{Global Rotation of Magnitude-Gated Activations}
+Let $g(z)=z\psi(|z|)$ with real scalar $\psi$. Then
+\begin{align}
+g(e^{i\alpha}z)
+&=e^{i\alpha}z\,\psi(|e^{i\alpha}z|)\\
+&=e^{i\alpha}z\,\psi(|z|)\\
+&=e^{i\alpha}g(z).
+\end{align}
+Thus any magnitude-only multiplicative gate is $U(1)$-equivariant. modReLU is an established example~\cite{Arjovsky2016Unitary}; the implemented magnitude-gated SiLU applies the same symmetry principle to a sigmoid-weighted gate inspired by SiLU~\cite{Elfwing2018SiLU}.
+
+\subsection{Magnitude-Selected Pooling}
+Let $j^*(z)$ be an index chosen only from the set of magnitudes $\{|z_j|\}$. Under a common rotation, $|e^{i\alpha}z_j|=|z_j|$, so $j^*(e^{i\alpha}z)=j^*(z)$. Therefore
+\begin{equation}
+P(e^{i\alpha}z)=e^{i\alpha}z_{j^*(z)}=e^{i\alpha}P(z).
+\end{equation}
+This applies to both magnitude-max and magnitude-median selection, including deterministic lower-median tie behavior. The lack of a natural order on $\mathbb{C}$ motivates magnitude-based orderings in complex CNNs~\cite{Guberman2016ComplexCNN,Lee2022CVNNSurvey}; the lower-median complex selector itself is the implementation used in this study.
+
+\subsection{Holographic Similarity}
+For common rotation of query and key,
+\begin{align}
+\Re\{(e^{i\alpha}q)(e^{i\alpha}k)^H\}
+&=\Re\{qk^H\},\\
+\||e^{i\alpha}q|-|e^{i\alpha}k|\|_2^2
+&=\||q|-|k|\|_2^2.
+\end{align}
+Hence the implemented similarity score is invariant when the query and key projections rotate together. Complex-valued scaled dot-product attention provides related precedent for Hermitian/complex query-key similarities~\cite{Eilers2023ComplexTransformer}; the magnitude-distance correction in Eq.~\eqref{eq:holographic} is study-specific. If the value projection is also equivariant, the attention-weighted value sum rotates equivariantly. This property is conditional on the surrounding projections and normalization; a widely-linear projection can violate the shared-rotation relation.
+
+\subsection{Widely-Linear Decomposition}
+Any real-linear map $T:\mathbb{C}^n\rightarrow\mathbb{C}^m$ can be decomposed into complex-linear and conjugate-linear parts,
+\begin{equation}
+T(z)=T_+(z)+T_-(z),
+\end{equation}
+with
+\begin{align}
+T_+(z)&=\tfrac12\left(T(z)-iT(iz)\right),\\
+T_-(z)&=\tfrac12\left(T(z)+iT(iz)\right).
+\end{align}
+The first component is complex-linear and the second is conjugate-linear, yielding the representation $W_1z+W_2z^*$. This is the classical widely-linear representation used for complex data~\cite{Picinbono1995WidelyLinear} and gives the analytic basis for treating the standard/widely-linear factor as a constraint-versus-flexibility comparison.

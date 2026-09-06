@@ -1,0 +1,6 @@
+% =============================================================================
+\section{Conclusion}\label{sec:conclusion}
+% =============================================================================
+This study formulates complex-valued prostate MRI classification as a parameter-controlled architecture experiment. A fixed magnitude-only CNN is compared with 480 complex configurations spanning image/Fourier representation, pooling, normalization, convolution, activation, and stream/interaction design. The completed grid shows that complex-valued processing is not intrinsically superior to magnitude-only learning: only \ComplexWins/\ComplexTotal complex configurations exceed the real-baseline AUC of \RealAUC. At the same time, the grid contains configurations with substantially higher observed discrimination, and the factor summaries reveal strong dependence on how the complex information is represented and processed.
+
+The main conclusion is therefore conditional. Retaining complex information creates a larger representational space, but useful performance depends on the inductive bias imposed by the network. The current fixed-seed, fixed-test-cohort experiment characterizes that architecture surface; confirmation of a selected architecture requires additional uncertainty analysis and independent validation.
