@@ -39,23 +39,6 @@ The fixed real baseline contains 1,685,890 trainable scalar parameters. The cano
 \end{equation}
 This is important because widely-linear kernels, dual branches, and interaction modules can otherwise increase scalar capacity independently of the representation question. Matching does not make the architectures functionally equivalent, but it controls the simplest capacity confound.
 
-\begin{table*}[t]
-\centering
-\caption{Representative architecture definitions and parameter-budget role.}
-\label{tab:architectures}
-\scriptsize
-\begin{tabularx}{\textwidth}{L{2.5cm}L{3.5cm}L{2.7cm}L{2.3cm}X}
-\toprule
-Model family & Input / stream & Canonical widths & Trainable scalars & Main structural distinction \\
-\midrule
-Real baseline & Four magnitude channels & 45/91/181/272 & 1,685,890 & Real conv + BatchNorm + SiLU + max pooling \\
-Canonical complex & Four complex channels, complex-only & 32/64/128/192 & 1,681,473 & Standard complex conv + RMSNorm + modReLU; pooling varied \\
-Widely-linear variants & Complex-only or dual & Automatically matched & Within 1\% of real & Adds conjugate kernel pathway; widths reduced as needed \\
-Dual-stream variants & Magnitude + complex & Automatically matched & Within 1\% of real & Parallel real/complex feature extraction and optional interaction \\
-\bottomrule
-\end{tabularx}
-\end{table*}
-
 \subsection{Optimization and Imbalance Handling}
 Training uses AdamW~\cite{Loshchilov2019AdamW} with learning rate $10^{-3}$ and weight decay $10^{-4}$. The maximum number of epochs is 100. Mini-batch size is 8 with four gradient-accumulation steps, giving an effective optimization batch of 32 samples. The loss is unweighted binary cross entropy with logits. Dropout with probability 0.2 is applied before the final classifier.
 

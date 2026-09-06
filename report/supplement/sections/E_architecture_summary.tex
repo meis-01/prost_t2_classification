@@ -1,0 +1,20 @@
+% =============================================================================
+\section{Representative Architecture and Parameter-Budget Summary}
+% =============================================================================
+
+\begin{table*}[t]
+\centering
+\caption{Representative architecture definitions and parameter-budget role.}
+\label{tab:architectures}
+\scriptsize
+\begin{tabularx}{\textwidth}{L{2.5cm}L{3.5cm}L{2.7cm}L{2.3cm}X}
+\toprule
+Model family & Input / stream & Canonical widths & Trainable scalars & Main structural distinction \\
+\midrule
+Real baseline & Four magnitude channels & 45/91/181/272 & 1,685,890 & Real conv + BatchNorm + SiLU + max pooling \\
+Canonical complex & Four complex channels, complex-only & 32/64/128/192 & 1,681,473 & Standard complex conv + RMSNorm + modReLU; pooling varied \\
+Widely-linear variants & Complex-only or dual & Automatically matched & Within 1\% of real & Adds conjugate kernel pathway; widths reduced as needed \\
+Dual-stream variants & Magnitude + complex & Automatically matched & Within 1\% of real & Parallel real/complex feature extraction and optional interaction \\
+\bottomrule
+\end{tabularx}
+\end{table*}
