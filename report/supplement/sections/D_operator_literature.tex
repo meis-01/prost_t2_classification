@@ -1,0 +1,22 @@
+% =============================================================================
+\section{Factorial-Operator Literature and Context}
+% =============================================================================
+
+\begin{table*}[t]
+\centering
+\caption{Representative literature motivating the factorial dimensions. Citations indicate prior introduction or discussion of the underlying design family; several exact operators used here are study-specific adaptations, as noted in Section~\ref{sec:models}.}
+\label{tab:factor-literature}
+\scriptsize
+\begin{tabularx}{\textwidth}{L{2.2cm}L{5.0cm}X}
+\toprule
+Factor & Representative literature & Relation to the implemented levels \\
+\midrule
+Input domain & Eo et al.~\cite{Eo2018KIKINet}; Gosche et al.~\cite{Gosche2024DomainInfluence} & Prior MRI work compares or combines spatial/image and Fourier/k-space learning domains. \\
+Pooling & Guberman~\cite{Guberman2016ComplexCNN}; Tao et al.~\cite{Tao2022Pooling}; Lee et al.~\cite{Lee2022CVNNSurvey} & Complex ordering is nontrivial; max/average/median represent distinct selection and aggregation principles. \\
+Normalization & Trabelsi et al.~\cite{Trabelsi2018DeepComplex}; Zhang and Sennrich~\cite{Zhang2019RMSNorm} & Covariance whitening motivates complex BatchNorm; RMSNorm motivates power-only re-scaling, adapted here to complex channel power. \\
+Convolution & Guberman~\cite{Guberman2016ComplexCNN}; Trabelsi et al.~\cite{Trabelsi2018DeepComplex}; Picinbono and Chevalier~\cite{Picinbono1995WidelyLinear} & Standard complex convolution imposes the complex-linear block structure; widely-linear processing adds a conjugate pathway. \\
+Activation & Nitta~\cite{Nitta1997ComplexBP}; Arjovsky et al.~\cite{Arjovsky2016Unitary}; Virtue et al.~\cite{Virtue2017ComplexActivation}; Scardapane et al.~\cite{Scardapane2020ComplexActivations} & Split, magnitude-gated, and phase-selective nonlinearities provide contrasting symmetry constraints. \\
+Stream/interaction & Young et al.~\cite{Young2026Hybrid}; Hu et al.~\cite{Hu2018SENet}; Woo et al.~\cite{Woo2018CBAM}; Eilers and Jiang~\cite{Eilers2023ComplexTransformer} & Hybrid real/complex paths, multiplicative gating, and complex attention motivate the interaction families; the exact gate and holographic score are defined here. \\
+\bottomrule
+\end{tabularx}
+\end{table*}
