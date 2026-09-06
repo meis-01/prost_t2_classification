@@ -72,9 +72,13 @@ Rank & Configuration & AUC & AP & Factor levels (domain / pooling / normalizatio
 \end{tabular}
 \end{table*}
 
+\subsection{Joint AUC--AP Landscape}
+
 \begin{figure}[!t]
 \centering
-\blankfigure[4.0cm]
-\caption{Test AUC versus average precision for all complex configurations, with the real baseline, canonical models, and highest-AUC configuration marked.}
+\includegraphics[width=\columnwidth]{../figures/results_auc_ap_landscape/figure_auc_ap_landscape_artwork.pdf}
+\caption{Joint distribution of test AUC and average precision across the 480 complex-valued configurations. Image-domain and Fourier-domain configurations are distinguished by marker style; dashed reference lines denote the fixed real magnitude baseline in AUC and average precision.}
 \label{fig:aucap}
 \end{figure}
+
+Across the finite 480-configuration factorial grid, 114/480 complex configurations (23.8\%) exceeded the real baseline in both AUC and AP. This occurred for 101/240 image-domain configurations (42.1\%) and 13/240 Fourier-domain configurations (5.4\%). Across all configurations, AUC and AP showed a Pearson correlation of $r=0.755$ and a Spearman rank correlation of $\rho=0.788$. These quadrant counts and correlations are descriptive properties of the observed finite factorial grid.
