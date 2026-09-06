@@ -6,23 +6,6 @@ The completed result table contains one real baseline and 480 complex configurat
 \subsection{Overall Factorial Performance}
 The real magnitude baseline achieved test AUC \RealAUC and AP \RealAP. Across the 480 complex configurations, AUC ranged from \ComplexMinAUC to \BestAUC, with mean AUC \ComplexMeanAUC and mean AP \ComplexMeanAP. \ComplexWins/\ComplexTotal complex configurations exceeded the real-baseline AUC.
 
-\begin{table}[t]
-\centering
-\caption{Direct performance summary from the completed experiment CSV.}
-\label{tab:overall}
-\scriptsize
-\begin{tabular}{lcc}
-\toprule
-Summary & AUC & AP \\
-\midrule
-Real magnitude baseline & \RealAUC & \RealAP \\
-All complex configurations (mean) & \ComplexMeanAUC & \ComplexMeanAP \\
-Image-domain complex (mean) & \ImageAUC & \ImageAP \\
-Fourier-domain complex (mean) & \FourierAUC & \FourierAP \\
-\bottomrule
-\end{tabular}
-\end{table}
-
 \begin{figure}[!t]
 \centering
 \includegraphics[width=\columnwidth]{../figures/results_auc_landscape/figure_auc_landscape_artwork.pdf}
