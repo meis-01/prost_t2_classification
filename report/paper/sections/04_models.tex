@@ -133,6 +133,13 @@ s_{ij}=s_{ij}^{(H)}-\gamma\frac{\||q_i|-|k_j|\|_2^2}{d},\qquad \gamma=1.
 \end{equation}
 Softmax-normalized weights aggregate the complex values, followed by an output projection, residual connection, and the selected complex normalization. The first term is a real Hermitian similarity; the second compares magnitude vectors rather than full complex Euclidean distance. The added magnitude-distance penalty and its combination with the Hermitian score are specific to the present implementation; the cited complex-attention literature motivates the complex query/key/value attention setting, not this exact score.
 
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{../figures/figure_interactions/figure5_artwork.pdf}
+\caption{Implemented interaction mechanisms. (a) The modulus cross-stream gate derives a real-valued gate from complex-feature magnitude and applies it to the real branch. (b) Holographic attention operates within the complex branch using complex-valued query, key, and value projections with an additional magnitude-distance term.}
+\label{fig:interactions}
+\end{figure*}
+
 \begin{figure*}[!t]
 \centering
 \includegraphics[width=\textwidth]{../figures/figure_model_families/figure3_artwork.pdf}
