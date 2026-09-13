@@ -10,6 +10,9 @@ data/
 runs/
 *.pt
 paper/
+report/overleaf/
+report/tmp/
+tmp/
 **/qa_render**
 **.aux
 **.log

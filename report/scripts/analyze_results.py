@@ -8,8 +8,10 @@ ROOT = Path(__file__).resolve().parents[2]
 CSV = ROOT / 'results' / 'test_metrics_all_runs.csv'
 REPORT = ROOT / 'report'
 OUT = REPORT / 'derived'
-PAPER = REPORT / 'paper'
+OVERLEAF = REPORT / 'overleaf'
+GENERATED = OVERLEAF / 'generated'
 OUT.mkdir(parents=True, exist_ok=True)
+GENERATED.mkdir(parents=True, exist_ok=True)
 
 def decode(label):
     if label == 'real':
@@ -97,7 +99,7 @@ def main():
         elif macro.endswith('Ap'):
             macro = macro[:-2] + 'AP'
         macro_lines.append('\\newcommand{\\%s}{%s\\xspace}' % (macro, value))
-    (PAPER / 'generated_metrics.tex').write_text('\n'.join(macro_lines) + '\n')
+    (GENERATED / 'metrics.tex').write_text('\n'.join(macro_lines) + '\n')
 
     # The top-configuration row macro keeps the manuscript source readable
     # while preserving generated tabular content in one grouped file.
@@ -106,7 +108,7 @@ def main():
         '\\newcommand{\\TopTableRows}{%', top_rows_text, '}',
         '',
     ])
-    (PAPER / 'generated_tables.tex').write_text(table_text)
+    (GENERATED / 'tables.tex').write_text(table_text)
     print(json.dumps(summary, indent=2))
 
 if __name__ == '__main__': main()
